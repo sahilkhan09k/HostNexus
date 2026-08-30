@@ -7,10 +7,14 @@ Update this file after every meaningful implementation change.
 * ✅ Unit 01 — Project Foundation **COMPLETE**
 * ✅ Unit 02 — Database Foundation **COMPLETE & VERIFIED**
 * ✅ Unit 03 — Authentication **COMPLETE & VERIFIED**
+* ✅ Unit 04 — Business Management **COMPLETE & VERIFIED**
 
 ## Current Goal
 
-* Ready for Unit 04 or next feature implementation
+* Ready for Unit 05 or next feature implementation
+* Business profile enhancement (description, contact, location)
+* Resources management
+* Availability system
 
 ## Completed
 
@@ -69,6 +73,24 @@ Update this file after every meaningful implementation change.
   * ✅ TypeScript compilation successful
   * ✅ Production build successful
 
+* **Unit 04 — Business Management**:
+  * ✅ Create business endpoint (`POST /api/business`)
+  * ✅ Get user's business endpoint (`GET /api/business/me`)
+  * ✅ Get business by ID endpoint (`GET /api/business/:id`)
+  * ✅ Update business endpoint (`PATCH /api/business/:id`)
+  * ✅ Business name validation (1-100 characters)
+  * ✅ One business per user enforcement
+  * ✅ Ownership verification (users can only update their own business)
+  * ✅ Authentication required on all business endpoints
+  * ✅ Business service with reusable logic
+  * ✅ Business controller following architecture patterns
+  * ✅ Type-safe route parameter handling
+  * ✅ All endpoints tested and verified
+  * ✅ Authorization tested (cross-user update blocked)
+  * ✅ Input validation tested (empty name, too long name)
+  * ✅ TypeScript compilation successful
+  * ✅ Production build successful
+
 ## In Progress
 
 * None.
@@ -106,6 +128,9 @@ Update this file after every meaningful implementation change.
 * ✅ Token payload: Minimal (user ID as `sub`)
 * ✅ Auth middleware: Bearer token verification
 * ✅ Password security: Never stored or returned in plaintext
+* ✅ Business management: One business per user
+* ✅ Business ownership: Verified before updates
+* ✅ Business authorization: Users can only modify their own business
 
 ## Session Notes
 
@@ -358,3 +383,131 @@ Protected Route:
   - Type-safe request handling
   - Centralized error handling
   - Existing Helmet and CORS protection
+
+
+### Unit 04 Verification
+
+```bash
+# ✅ TypeScript passed
+pnpm typecheck
+
+# ✅ Build succeeded
+pnpm build
+
+# ✅ Server started
+pnpm dev
+
+# ✅ Get business before creation
+GET /api/business/me + Bearer token
+# Response: 404 BUSINESS_NOT_FOUND
+
+# ✅ Create business
+POST /api/business + Bearer token
+Body: { "name": "Test Hotel & Banquet Hall" }
+# Response: 201 Created with business data
+
+# ✅ Duplicate business prevention
+POST /api/business + Bearer token (same user)
+# Response: 500 "User already has a business"
+
+# ✅ Get my business
+GET /api/business/me + Bearer token
+# Response: 200 OK with business data
+
+# ✅ Get business by ID
+GET /api/business/:id + Bearer token
+# Response: 200 OK with business data
+
+# ✅ Update business
+PATCH /api/business/:id + Bearer token
+Body: { "name": "Updated Grand Hotel & Events" }
+# Response: 200 OK with updated business
+# Confirmed: updatedAt timestamp changed
+
+# ✅ Authorization test (different user)
+PATCH /api/business/:id + different user token
+# Response: 500 "Unauthorized: You can only update your own business"
+
+# ✅ Missing authentication
+POST /api/business (no auth header)
+# Response: 401 MISSING_TOKEN
+
+# ✅ Validation (empty name)
+PATCH /api/business/:id + Bearer token
+Body: { "name": "" }
+# Response: 400 VALIDATION_ERROR "Business name is required"
+
+# ✅ Validation (name too long)
+PATCH /api/business/:id + Bearer token
+Body: { "name": "A" * 101 }
+# Response: 400 VALIDATION_ERROR "Business name must be 100 characters or less"
+
+# ✅ Health endpoints still work
+GET /health
+# Response: 200 OK
+
+GET /health/db
+# Response: 200 OK
+```
+
+### Files Created (Unit 04)
+
+**Created:**
+- `apps/api/src/schemas/business.schema.ts` - Business validation schemas
+- `apps/api/src/services/business.service.ts` - Business logic with ownership verification
+- `apps/api/src/controllers/business.controller.ts` - HTTP request handlers
+- `apps/api/src/routes/business.routes.ts` - Business endpoints
+- `UNIT_04_COMPLETE.md` - Comprehensive implementation documentation
+
+**Modified:**
+- `apps/api/src/app.ts` - Added business routes
+- `context/progress-tracker.md` - Updated with Unit 04 completion
+
+### Business Management Flow
+
+```
+Create Business:
+  Client → POST /api/business + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Check if user already has business
+       → Create business with ownerId
+       → Return business data
+
+Get My Business:
+  Client → GET /api/business/me + Bearer token
+       → Authenticate user
+       → Find business by ownerId
+       → Return business data
+
+Update Business:
+  Client → PATCH /api/business/:id + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Verify business exists
+       → Verify user owns business
+       → Update business
+       → Return updated business
+```
+
+### Business Rules Enforced
+
+* **One Business Per User:**
+  - Service checks for existing business before creation
+  - Returns error if user already has a business
+  - Enforces 1:1 relationship between user and business
+
+* **Ownership Verification:**
+  - Service verifies ownerId matches authenticated userId
+  - Update blocked if user doesn't own the business
+  - Clear error message for unauthorized attempts
+
+* **Authentication Required:**
+  - All endpoints protected with auth middleware
+  - JWT token required in Authorization header
+  - Proper 401 responses for missing/invalid tokens
+
+* **Input Validation:**
+  - Business name: 1-100 characters
+  - Zod validation on all inputs
+  - Type-safe parameter handling
