@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import healthRoutes from "./routes/health.routes.js";
+import healthDbRoutes from "./routes/health-db.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 export function createApp(): Express {
@@ -22,8 +23,9 @@ export function createApp(): Express {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Health endpoint
+  // Health endpoints
   app.use("/health", healthRoutes);
+  app.use("/health/db", healthDbRoutes);
 
   // Centralized error handling
   app.use(errorHandler);
