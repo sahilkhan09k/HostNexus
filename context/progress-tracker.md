@@ -7,10 +7,15 @@ Update this file after every meaningful implementation change.
 * ✅ Unit 01 — Project Foundation **COMPLETE**
 * ✅ Unit 02 — Database Foundation **COMPLETE & VERIFIED**
 * ✅ Unit 03 — Authentication **COMPLETE & VERIFIED**
+* ✅ Unit 04 — Business Management **COMPLETE & VERIFIED**
+* ✅ Unit 05 — Resource Management **COMPLETE & VERIFIED**
 
 ## Current Goal
 
-* Ready for Unit 04 or next feature implementation
+* Ready for Unit 06 or next feature implementation
+* Availability system
+* Booking workflows
+* Resource search and discovery
 
 ## Completed
 
@@ -69,6 +74,44 @@ Update this file after every meaningful implementation change.
   * ✅ TypeScript compilation successful
   * ✅ Production build successful
 
+* **Unit 04 — Business Management**:
+  * ✅ Create business endpoint (`POST /api/business`)
+  * ✅ Get user's business endpoint (`GET /api/business/me`)
+  * ✅ Get business by ID endpoint (`GET /api/business/:id`)
+  * ✅ Update business endpoint (`PATCH /api/business/:id`)
+  * ✅ Business name validation (1-100 characters)
+  * ✅ One business per user enforcement
+  * ✅ Ownership verification (users can only update their own business)
+  * ✅ Authentication required on all business endpoints
+  * ✅ Business service with reusable logic
+  * ✅ Business controller following architecture patterns
+  * ✅ Type-safe route parameter handling
+  * ✅ All endpoints tested and verified
+  * ✅ Authorization tested (cross-user update blocked)
+  * ✅ Input validation tested (empty name, too long name)
+  * ✅ TypeScript compilation successful
+  * ✅ Production build successful
+
+* **Unit 05 — Resource Management**:
+  * ✅ Create resource endpoint (`POST /api/resources`)
+  * ✅ Get all resources endpoint (`GET /api/resources`)
+  * ✅ Get resource by ID endpoint (`GET /api/resources/:id`)
+  * ✅ Update resource endpoint (`PATCH /api/resources/:id`)
+  * ✅ Delete resource endpoint (`DELETE /api/resources/:id`)
+  * ✅ Resource model with Business relationship (one-to-many)
+  * ✅ Resource validation (name, type, quantity, status, location)
+  * ✅ Filtering support (resourceType, status, isActive)
+  * ✅ Business ownership enforcement (users manage own resources only)
+  * ✅ Access control on resource retrieval (403 for unauthorized)
+  * ✅ Database migration created and applied
+  * ✅ Indexes added (businessId, resourceType, status, isActive)
+  * ✅ Cascade delete (business deletion removes resources)
+  * ✅ Status enum (available, unavailable, maintenance, reserved)
+  * ✅ All endpoints tested and verified (12 test scenarios)
+  * ✅ Authorization tested (no business, cross-business access blocked)
+  * ✅ TypeScript compilation successful
+  * ✅ Production build successful
+
 ## In Progress
 
 * None.
@@ -106,6 +149,12 @@ Update this file after every meaningful implementation change.
 * ✅ Token payload: Minimal (user ID as `sub`)
 * ✅ Auth middleware: Bearer token verification
 * ✅ Password security: Never stored or returned in plaintext
+* ✅ Business management: One business per user
+* ✅ Business ownership: Verified before updates
+* ✅ Business authorization: Users can only modify their own business
+* ✅ Resource management: Resources belong to business
+* ✅ Resource ownership: Verified before updates/deletes
+* ✅ Resource authorization: Users manage only their business's resources
 
 ## Session Notes
 
@@ -358,3 +407,346 @@ Protected Route:
   - Type-safe request handling
   - Centralized error handling
   - Existing Helmet and CORS protection
+
+
+### Unit 04 Verification
+
+```bash
+# ✅ TypeScript passed
+pnpm typecheck
+
+# ✅ Build succeeded
+pnpm build
+
+# ✅ Server started
+pnpm dev
+
+# ✅ Get business before creation
+GET /api/business/me + Bearer token
+# Response: 404 BUSINESS_NOT_FOUND
+
+# ✅ Create business
+POST /api/business + Bearer token
+Body: { "name": "Test Hotel & Banquet Hall" }
+# Response: 201 Created with business data
+
+# ✅ Duplicate business prevention
+POST /api/business + Bearer token (same user)
+# Response: 500 "User already has a business"
+
+# ✅ Get my business
+GET /api/business/me + Bearer token
+# Response: 200 OK with business data
+
+# ✅ Get business by ID
+GET /api/business/:id + Bearer token
+# Response: 200 OK with business data
+
+# ✅ Update business
+PATCH /api/business/:id + Bearer token
+Body: { "name": "Updated Grand Hotel & Events" }
+# Response: 200 OK with updated business
+# Confirmed: updatedAt timestamp changed
+
+# ✅ Authorization test (different user)
+PATCH /api/business/:id + different user token
+# Response: 500 "Unauthorized: You can only update your own business"
+
+# ✅ Missing authentication
+POST /api/business (no auth header)
+# Response: 401 MISSING_TOKEN
+
+# ✅ Validation (empty name)
+PATCH /api/business/:id + Bearer token
+Body: { "name": "" }
+# Response: 400 VALIDATION_ERROR "Business name is required"
+
+# ✅ Validation (name too long)
+PATCH /api/business/:id + Bearer token
+Body: { "name": "A" * 101 }
+# Response: 400 VALIDATION_ERROR "Business name must be 100 characters or less"
+
+# ✅ Health endpoints still work
+GET /health
+# Response: 200 OK
+
+GET /health/db
+# Response: 200 OK
+```
+
+### Files Created (Unit 04)
+
+**Created:**
+- `apps/api/src/schemas/business.schema.ts` - Business validation schemas
+- `apps/api/src/services/business.service.ts` - Business logic with ownership verification
+- `apps/api/src/controllers/business.controller.ts` - HTTP request handlers
+- `apps/api/src/routes/business.routes.ts` - Business endpoints
+- `UNIT_04_COMPLETE.md` - Comprehensive implementation documentation
+
+**Modified:**
+- `apps/api/src/app.ts` - Added business routes
+- `context/progress-tracker.md` - Updated with Unit 04 completion
+
+### Business Management Flow
+
+```
+Create Business:
+  Client → POST /api/business + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Check if user already has business
+       → Create business with ownerId
+       → Return business data
+
+Get My Business:
+  Client → GET /api/business/me + Bearer token
+       → Authenticate user
+       → Find business by ownerId
+       → Return business data
+
+Update Business:
+  Client → PATCH /api/business/:id + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Verify business exists
+       → Verify user owns business
+       → Update business
+       → Return updated business
+```
+
+### Business Rules Enforced
+
+* **One Business Per User:**
+  - Service checks for existing business before creation
+  - Returns error if user already has a business
+  - Enforces 1:1 relationship between user and business
+
+* **Ownership Verification:**
+  - Service verifies ownerId matches authenticated userId
+  - Update blocked if user doesn't own the business
+  - Clear error message for unauthorized attempts
+
+* **Authentication Required:**
+  - All endpoints protected with auth middleware
+  - JWT token required in Authorization header
+  - Proper 401 responses for missing/invalid tokens
+
+* **Input Validation:**
+  - Business name: 1-100 characters
+  - Zod validation on all inputs
+  - Type-safe parameter handling
+
+
+### Unit 05 Verification
+
+```bash
+# ✅ Dependencies (none required, reused existing)
+
+# ✅ Database schema updated
+pnpm prisma migrate dev --name add_resource_model
+# Created: 20260830125522_add_resource_model
+
+# ✅ Prisma client regenerated
+pnpm prisma generate
+
+# ✅ TypeScript passed
+pnpm typecheck
+
+# ✅ Build succeeded
+pnpm build
+
+# ✅ Server started
+pnpm dev
+
+# ✅ Create resource
+POST /api/resources + Bearer token
+Body: { "name": "Banquet Hall A", "resourceType": "venue", ... }
+# Response: 201 Created with resource data
+# Confirmed: businessId linked correctly
+
+# ✅ Create another resource
+POST /api/resources + Bearer token
+Body: { "name": "Conference Room 1", "resourceType": "meeting-space", ... }
+# Response: 201 Created
+
+# ✅ Get all resources
+GET /api/resources + Bearer token
+# Response: 200 OK with array of 2 resources
+
+# ✅ Get resource by ID
+GET /api/resources/:id + Bearer token
+# Response: 200 OK with resource data
+
+# ✅ Update resource
+PATCH /api/resources/:id + Bearer token
+Body: { "name": "Grand Banquet Hall A", "status": "maintenance" }
+# Response: 200 OK with updated resource
+# Confirmed: updatedAt timestamp changed
+
+# ✅ Filter by resource type
+GET /api/resources?resourceType=venue + Bearer token
+# Response: 200 OK with filtered resources
+
+# ✅ Filter by status
+GET /api/resources?status=available + Bearer token
+# Response: 200 OK with filtered resources
+
+# ✅ Delete resource
+DELETE /api/resources/:id + Bearer token
+# Response: 200 OK with success message
+
+# ✅ Verify resource deleted
+GET /api/resources/:id + Bearer token
+# Response: 404 RESOURCE_NOT_FOUND
+
+# ✅ Authorization test (no business)
+POST /api/resources + Bearer token (user without business)
+# Response: 500 "You must have a business to create resources"
+
+# ✅ Validation test (empty name)
+POST /api/resources + Bearer token
+Body: { "name": "", "resourceType": "venue" }
+# Response: 400 VALIDATION_ERROR "Resource name is required"
+
+# ✅ Health endpoints still work
+GET /health
+# Response: 200 OK
+
+GET /health/db
+# Response: 200 OK
+```
+
+### Files Created (Unit 05)
+
+**Created:**
+- `apps/api/prisma/migrations/20260830125522_add_resource_model/migration.sql` - Database migration
+- `apps/api/src/schemas/resource.schema.ts` - Resource validation schemas
+- `apps/api/src/services/resource.service.ts` - Resource business logic with ownership verification
+- `apps/api/src/controllers/resource.controller.ts` - HTTP request handlers
+- `apps/api/src/routes/resource.routes.ts` - Resource endpoints
+- `UNIT_05_COMPLETE.md` - Comprehensive implementation documentation
+
+**Modified:**
+- `apps/api/prisma/schema.prisma` - Added Resource model with Business relationship
+- `apps/api/src/app.ts` - Added resource routes
+- `context/progress-tracker.md` - Updated with Unit 05 completion
+
+### Resource Management Flow
+
+```
+Create Resource:
+  Client → POST /api/resources + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Check if user has business
+       → Create resource with businessId
+       → Return resource data
+
+Get Resources:
+  Client → GET /api/resources?resourceType=X&status=Y + Bearer token
+       → Authenticate user
+       → Find user's business
+       → Find resources with filters
+       → Return resources array
+
+Update Resource:
+  Client → PATCH /api/resources/:id + Bearer token
+       → Authenticate user
+       → Validate input (Zod)
+       → Verify resource exists
+       → Verify user owns resource (via business)
+       → Update resource
+       → Return updated resource
+
+Delete Resource:
+  Client → DELETE /api/resources/:id + Bearer token
+       → Authenticate user
+       → Verify resource exists
+       → Verify user owns resource (via business)
+       → Delete resource
+       → Return success message
+```
+
+### Resource Rules Enforced
+
+* **Business Required:**
+  - Service checks if user has business before creation
+  - Returns error if user doesn't have business
+  - Enforces Business → Resources relationship
+
+* **Ownership Verification:**
+  - Service verifies resource belongs to user's business
+  - Update/delete blocked if user doesn't own resource
+  - Access control on retrieval (403 for unauthorized access)
+
+* **Authentication Required:**
+  - All endpoints protected with auth middleware
+  - JWT token required in Authorization header
+  - Proper 401 responses for missing/invalid tokens
+
+* **Input Validation:**
+  - Resource name: 1-200 characters (required)
+  - Resource type: 1-100 characters (required)
+  - Description: max 1000 characters (optional)
+  - Quantity: positive integer (default 1)
+  - Status: enum validation (available/unavailable/maintenance/reserved)
+  - Location: max 200 characters (optional)
+  - Unit: max 50 characters (optional)
+  - Zod validation on all inputs
+  - Type-safe parameter handling
+
+* **Filtering Support:**
+  - Filter by resourceType
+  - Filter by status
+  - Filter by isActive
+  - Multiple filters can be combined
+
+### Database Schema (Unit 05)
+
+```prisma
+model Resource {
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  resourceType String
+  quantity     Int      @default(1)
+  unit         String?
+  status       String   @default("available")
+  location     String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([resourceType])
+  @@index([status])
+  @@index([isActive])
+  @@map("resources")
+}
+
+model Business {
+  // ... existing fields
+  resources Resource[] // Added relationship
+}
+```
+
+**Relationship**: Business → Resources (one-to-many)
+**Cascade Delete**: When business is deleted, all its resources are deleted
+
+### Technical Notes (Unit 05)
+
+* **Architecture Pattern**: Follows exact Business Management structure
+  - Route → Middleware → Controller → Service → Prisma
+* **Service Reusability**: Resource service reuses BusinessService methods
+  - `verifyBusinessOwnership()` for ownership checks
+  - DRY principle maintained
+* **Access Control**: 403 Forbidden when user tries to access other business's resources
+* **Indexes**: Added for efficient filtering (businessId, resourceType, status, isActive)
+* **Status Enum**: available, unavailable, maintenance, reserved (default: available)
+* **Default Values**: quantity=1, status="available", isActive=true
+* **Filtering**: Query params for resourceType, status, isActive
+* **Query Validation**: Zod schema validates filter parameters
+* **Type Safety**: All request handlers type-safe with parameter validation
+* **Error Handling**: Consistent error codes and messages
