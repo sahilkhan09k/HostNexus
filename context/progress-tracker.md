@@ -6,10 +6,11 @@ Update this file after every meaningful implementation change.
 
 * ✅ Unit 01 — Project Foundation **COMPLETE**
 * ✅ Unit 02 — Database Foundation **COMPLETE & VERIFIED**
+* ✅ Unit 03 — Authentication **COMPLETE & VERIFIED**
 
 ## Current Goal
 
-* Ready for Unit 03 — Authentication
+* Ready for Unit 04 or next feature implementation
 
 ## Completed
 
@@ -46,19 +47,40 @@ Update this file after every meaningful implementation change.
   * ✅ TypeScript compilation successful
   * ✅ Production build successful
 
+* **Unit 03 — Authentication**:
+  * ✅ User registration endpoint (`POST /api/auth/register`)
+  * ✅ Email/password validation with Zod
+  * ✅ Duplicate email prevention
+  * ✅ Password hashing with bcrypt (10 salt rounds)
+  * ✅ User login endpoint (`POST /api/auth/login`)
+  * ✅ Credential verification
+  * ✅ JWT token generation (7-day expiration)
+  * ✅ JWT secret from environment variable
+  * ✅ JWT_SECRET validation (min 32 characters)
+  * ✅ Authentication middleware
+  * ✅ Bearer token parsing and verification
+  * ✅ Current user endpoint (`GET /api/auth/me`)
+  * ✅ Protected route with JWT verification
+  * ✅ Type-safe Express.Request extension
+  * ✅ Never returns passwordHash in responses
+  * ✅ Consistent error messages for security
+  * ✅ Comprehensive error handling (missing/invalid/malformed tokens)
+  * ✅ All endpoints tested and verified
+  * ✅ TypeScript compilation successful
+  * ✅ Production build successful
+
 ## In Progress
 
 * None.
 
 ## Next Up
 
-* **Unit 03 — Authentication**:
-  * JWT token generation/validation
-  * bcrypt password hashing
-  * Register endpoint
-  * Login endpoint
-  * Auth middleware
-  * Protected routes
+* **Unit 04** or next specification
+* Business authorization
+* Business CRUD endpoints
+* Resources management
+* Availability system
+* Booking workflows
 
 ## Open Questions
 
@@ -78,6 +100,12 @@ Update this file after every meaningful implementation change.
 * ✅ Prisma client: Singleton with global caching in dev
 * ✅ Seed strategy: Upsert for idempotency
 * ✅ SSL: Required for Neon connections
+* ✅ Authentication: JWT + bcrypt
+* ✅ JWT expiration: 7 days
+* ✅ Password hashing: bcrypt with 10 salt rounds
+* ✅ Token payload: Minimal (user ID as `sub`)
+* ✅ Auth middleware: Bearer token verification
+* ✅ Password security: Never stored or returned in plaintext
 
 ## Session Notes
 
@@ -191,3 +219,142 @@ npx neon@latest init          # Initialize Neon project
 npx neon@latest status        # Check project status
 npx neon@latest branches      # List database branches
 ```
+
+### Unit 03 Verification
+
+```bash
+# ✅ Dependencies installed
+pnpm add bcrypt jsonwebtoken
+pnpm add -D @types/bcrypt @types/jsonwebtoken
+
+# ✅ TypeScript passed
+pnpm typecheck
+
+# ✅ Build succeeded
+pnpm build
+
+# ✅ Server started
+pnpm dev
+
+# ✅ Registration tested
+POST /api/auth/register
+# Response: 201 Created with user and token
+# Confirmed: No passwordHash in response
+
+# ✅ Duplicate registration blocked
+POST /api/auth/register (same email)
+# Response: 500 with error message
+
+# ✅ Login tested (correct credentials)
+POST /api/auth/login
+# Response: 200 OK with user and token
+
+# ✅ Login tested (incorrect credentials)
+POST /api/auth/login (wrong password)
+# Response: 500 with consistent error message
+
+# ✅ Protected endpoint tested (valid token)
+GET /api/auth/me + Bearer token
+# Response: 200 OK with user data
+
+# ✅ Protected endpoint tested (missing token)
+GET /api/auth/me (no auth header)
+# Response: 401 with MISSING_TOKEN error
+
+# ✅ Protected endpoint tested (invalid token)
+GET /api/auth/me + invalid token
+# Response: 401 with INVALID_TOKEN error
+
+# ✅ Protected endpoint tested (malformed format)
+GET /api/auth/me + malformed header
+# Response: 401 with INVALID_TOKEN_FORMAT error
+
+# ✅ Validation tested (invalid email)
+POST /api/auth/register (invalid email)
+# Response: 400 with VALIDATION_ERROR details
+
+# ✅ Validation tested (short password)
+POST /api/auth/register (password < 8 chars)
+# Response: 400 with VALIDATION_ERROR details
+
+# ✅ Health endpoints still work
+GET /health
+# Response: 200 OK
+
+GET /health/db
+# Response: 200 OK
+```
+
+### Files Created (Unit 03)
+
+**Created:**
+- `apps/api/src/schemas/auth.schema.ts` - Zod validation schemas
+- `apps/api/src/services/auth.service.ts` - Authentication business logic
+- `apps/api/src/controllers/auth.controller.ts` - HTTP request handlers
+- `apps/api/src/middleware/auth.middleware.ts` - JWT verification middleware
+- `apps/api/src/routes/auth.routes.ts` - Auth endpoints
+- `UNIT_03_COMPLETE.md` - Comprehensive implementation documentation
+
+**Modified:**
+- `apps/api/src/app.ts` - Added auth routes
+- `apps/api/src/config/env.ts` - Added JWT_SECRET validation
+- `apps/api/.env` - Added JWT_SECRET (gitignored)
+- `apps/api/.env.example` - Added JWT_SECRET template
+- `apps/api/package.json` - Added bcrypt and jsonwebtoken
+- `context/progress-tracker.md` - Updated with Unit 03 completion
+
+### Authentication Flow
+
+```
+Registration:
+  Client → POST /api/auth/register
+       → Validate input (Zod)
+       → Check duplicate email
+       → Hash password (bcrypt)
+       → Create user (Prisma)
+       → Generate JWT
+       → Return user + token
+
+Login:
+  Client → POST /api/auth/login
+       → Validate input (Zod)
+       → Find user by email
+       → Verify password (bcrypt)
+       → Generate JWT
+       → Return user + token
+
+Protected Route:
+  Client → GET /api/auth/me + Bearer token
+       → Extract token from header
+       → Verify JWT signature
+       → Attach userId to request
+       → Fetch user from database
+       → Return user data
+```
+
+### Security Measures
+
+* **Password Security:**
+  - Hashed with bcrypt (10 salt rounds)
+  - Never stored in plaintext
+  - Never returned in API responses
+  - Minimum 8 characters enforced
+
+* **Token Security:**
+  - JWT with HS256 algorithm
+  - 7-day expiration
+  - Minimal payload (user ID only)
+  - Secret from environment variable
+  - Verified on every protected request
+
+* **Error Handling:**
+  - Consistent error messages (no user enumeration)
+  - Proper HTTP status codes
+  - Descriptive error codes
+  - Zod validation with detailed field errors
+
+* **Request Security:**
+  - Input validation on all endpoints
+  - Type-safe request handling
+  - Centralized error handling
+  - Existing Helmet and CORS protection
