@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import healthRoutes from "./routes/health.routes.js";
 import healthDbRoutes from "./routes/health-db.routes.js";
+import authRoutes from "./routes/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 export function createApp(): Express {
@@ -26,6 +27,9 @@ export function createApp(): Express {
   // Health endpoints
   app.use("/health", healthRoutes);
   app.use("/health/db", healthDbRoutes);
+
+  // API routes
+  app.use("/api/auth", authRoutes);
 
   // Centralized error handling
   app.use(errorHandler);
