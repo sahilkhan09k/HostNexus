@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { motion, type Easing } from "framer-motion";
@@ -37,13 +37,13 @@ const RESOURCE_CARDS = [
     business: "JW Marriott Pune",
     title: "Grand Ballroom",
     description: "Opulent 10,000 sq.ft space with crystal chandeliers and AV setup included.",
-    price: "₹45,000",
+    price: "â‚¹45,000",
     priceUnit: "/day",
     capacity: 500,
     rating: 4.9,
     reviews: 38,
     available: true,
-    availableText: "Available Sat–Sun",
+    availableText: "Available Satâ€“Sun",
   },
   {
     id: 2,
@@ -54,7 +54,7 @@ const RESOURCE_CARDS = [
     business: "Radisson Blu Pune",
     title: "Industrial Production Kitchen",
     description: "Rational iCombi Pro 20-Grid Oven, prep stations, walk-in cold storage.",
-    price: "₹8,500",
+    price: "â‚¹8,500",
     priceUnit: "/half-day",
     capacity: 12,
     rating: 4.7,
@@ -70,8 +70,8 @@ const RESOURCE_CARDS = [
     gradientTo: "to-blue-50",
     business: "Fortune Hotels India",
     title: "Full AV Conference Bundle",
-    description: "4K projector, 75\" smart displays ×4, wireless mics, Dolby sound system.",
-    price: "₹12,000",
+    description: "4K projector, 75\" smart displays Ã—4, wireless mics, Dolby sound system.",
+    price: "â‚¹12,000",
     priceUnit: "/day",
     capacity: 200,
     rating: 4.8,
@@ -233,7 +233,7 @@ export function ResourceCategories() {
           className="mt-10 text-center"
         >
           <a
-            href="#marketplace"
+            href="/marketplace"
             className={cn(
               "inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-6 py-3 text-sm font-semibold text-stone-700",
               "shadow-[0_2px_6px_rgba(0,0,0,0.06)]",
@@ -248,3 +248,4 @@ export function ResourceCategories() {
     </section>
   );
 }
+

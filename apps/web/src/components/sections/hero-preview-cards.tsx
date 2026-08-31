@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, type Easing } from "framer-motion";
 import {
   Star, Users, MapPin, Zap, CheckCircle2,
@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
+const AUTO_MS = 5000;
 
 const ALL_CARDS = [
   {
@@ -109,12 +110,11 @@ const ALL_CARDS = [
   },
 ];
 
-const VISIBLE = 1; // cards shown at once
-
 export function HeroPreviewCards() {
   const [current, setCurrent] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
-
+  const [paused, setPaused] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const total = ALL_CARDS.length;
 
   const goTo = useCallback(
@@ -125,27 +125,51 @@ export function HeroPreviewCards() {
     [total]
   );
 
-  const prev = () => goTo(current - 1, -1);
-  const next = () => goTo(current + 1, 1);
+  const advance = useCallback(() => {
+    setDirection(1);
+    setCurrent((c) => (c + 1) % total);
+  }, [total]);
 
-  /* Framer Motion drag-to-swipe */
-  const handleDragEnd = (_: unknown, info: { offset: { x: number } }) => {
-    if (info.offset.x < -40) next();
-    else if (info.offset.x > 40) prev();
-  };
+  /* Auto-advance every 5s, resets on manual interaction */
+  useEffect(() => {
+    if (paused) return;
+    timerRef.current = setInterval(advance, AUTO_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [paused, advance, current]);
 
   const card = ALL_CARDS[current];
 
   const variants = {
-    enter: (d: number) => ({ opacity: 0, x: d * 48, scale: 0.97 }),
+    enter: (d: number) => ({ opacity: 0, x: d * 52, scale: 0.97 }),
     center: { opacity: 1, x: 0, scale: 1 },
-    exit: (d: number) => ({ opacity: 0, x: -d * 48, scale: 0.97 }),
+    exit:  (d: number) => ({ opacity: 0, x: -d * 52, scale: 0.97 }),
+  };
+
+  const handleDragEnd = (_: unknown, info: { offset: { x: number } }) => {
+    if (info.offset.x < -40) goTo(current + 1, 1);
+    else if (info.offset.x > 40) goTo(current - 1, -1);
   };
 
   return (
-    <div className="relative w-full select-none">
+    <div
+      className="relative w-full select-none"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      {/* Progress bar */}
+      <div className="mb-3 h-0.5 w-full overflow-hidden rounded-full bg-stone-200">
+        <motion.div
+          key={`progress-${current}`}
+          className="h-full rounded-full bg-emerald-500"
+          initial={{ width: "0%" }}
+          animate={{ width: paused ? "0%" : "100%" }}
+          transition={{ duration: AUTO_MS / 1000, ease: "linear" }}
+        />
+      </div>
 
-      {/* ── Card carousel ── */}
+      {/* Card */}
       <div className="relative overflow-hidden rounded-2xl">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
@@ -158,30 +182,21 @@ export function HeroPreviewCards() {
             transition={{ duration: 0.3, ease: EASE }}
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.15}
+            dragElastic={0.12}
             onDragEnd={handleDragEnd}
             className={cn(
-              "w-full cursor-grab active:cursor-grabbing",
-              "rounded-2xl border border-stone-200 bg-white overflow-hidden",
+              "w-full cursor-grab active:cursor-grabbing rounded-2xl border border-stone-200 bg-white overflow-hidden",
               "shadow-[0_8px_32px_-4px_rgba(0,0,0,0.12)]"
             )}
           >
-            {/* Colour accent top bar */}
             <div className={cn("h-1.5 w-full", card.accentBar)} />
-
             <div className="p-5">
-              {/* Header */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <span className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                    card.tagColor
-                  )}>
+                  <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold", card.tagColor)}>
                     {card.tag}
                   </span>
-                  <h3 className="mt-2.5 text-[15px] font-bold leading-snug text-stone-900">
-                    {card.title}
-                  </h3>
+                  <h3 className="mt-2.5 text-[15px] font-bold leading-snug text-stone-900">{card.title}</h3>
                   <div className="mt-1.5 flex items-center gap-1 text-xs text-stone-400">
                     <MapPin className="h-3 w-3 shrink-0 text-emerald-500" />
                     <span className="truncate">{card.business} · {card.location}</span>
@@ -196,8 +211,6 @@ export function HeroPreviewCards() {
                   {card.availableLabel}
                 </span>
               </div>
-
-              {/* Stats */}
               <div className="mt-4 flex items-center justify-between border-t border-stone-100 pt-4">
                 <div className="flex items-center gap-4 text-xs text-stone-400">
                   <span className="flex items-center gap-1.5">
@@ -220,9 +233,8 @@ export function HeroPreviewCards() {
         </AnimatePresence>
       </div>
 
-      {/* ── Navigation controls ── */}
+      {/* Controls */}
       <div className="mt-4 flex items-center justify-between">
-        {/* Dot indicators */}
         <div className="flex items-center gap-1.5">
           {ALL_CARDS.map((_, i) => (
             <button
@@ -231,61 +243,42 @@ export function HeroPreviewCards() {
               onClick={() => goTo(i, i > current ? 1 : -1)}
               className={cn(
                 "rounded-full transition-all duration-200",
-                i === current
-                  ? "h-2 w-6 bg-emerald-500"
-                  : "h-2 w-2 bg-stone-300 hover:bg-stone-400"
+                i === current ? "h-2 w-6 bg-emerald-500" : "h-2 w-2 bg-stone-300 hover:bg-stone-400"
               )}
               aria-label={`Go to listing ${i + 1}`}
             />
           ))}
         </div>
-
-        {/* Arrow buttons */}
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={prev}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500",
-              "hover:border-emerald-300 hover:text-emerald-600 hover:shadow-sm",
-              "transition-all duration-150 active:scale-95"
-            )}
-            aria-label="Previous listing"
+            onClick={() => goTo(current - 1, -1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 hover:border-emerald-300 hover:text-emerald-600 transition-all duration-150 active:scale-95"
+            aria-label="Previous"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
             type="button"
-            onClick={next}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500",
-              "hover:border-emerald-300 hover:text-emerald-600 hover:shadow-sm",
-              "transition-all duration-150 active:scale-95"
-            )}
-            aria-label="Next listing"
+            onClick={() => goTo(current + 1, 1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 hover:border-emerald-300 hover:text-emerald-600 transition-all duration-150 active:scale-95"
+            aria-label="Next"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* ── Counter ── */}
-      <p className="mt-2 text-[11px] text-stone-400">
-        {current + 1} of {total} listings
-      </p>
+      <p className="mt-2 text-[11px] text-stone-400">{current + 1} of {total} · hover to pause</p>
 
-      {/* ── Live indicator ── */}
-      <div className="mt-5 flex items-center gap-2">
+      <div className="mt-4 flex items-center gap-2">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
         </span>
-        <span className="text-xs font-medium text-stone-400">
-          35+ resources live · updated in real-time
-        </span>
+        <span className="text-xs font-medium text-stone-400">35+ resources live · updated in real-time</span>
       </div>
 
-      {/* ── Trust micro-row ── */}
       <div className="mt-3 flex items-center gap-4">
         <div className="flex items-center gap-1.5 text-xs text-stone-400">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
