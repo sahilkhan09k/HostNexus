@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRef } from "react";
 import { motion, type Easing } from "framer-motion";
@@ -37,13 +37,13 @@ export function HeroSection() {
       ref={sectionRef}
       className="relative min-h-screen overflow-hidden bg-[#FAFAF9] pt-[68px]"
     >
-      {/* ─── Full-screen photo background ─── */}
+      {/* â”€â”€â”€ Full-screen photo background â”€â”€â”€ */}
       <HeroBackground3D />
 
-      {/* ─── Hero content grid ─── */}
+      {/* â”€â”€â”€ Hero content grid â”€â”€â”€ */}
       <div className="relative z-[2] mx-auto grid min-h-[calc(100vh-68px)] max-w-screen-xl grid-cols-1 items-center gap-10 px-5 py-16 md:px-10 lg:grid-cols-[54fr_46fr] lg:gap-16 lg:px-16 lg:py-20">
 
-        {/* ── LEFT: Text + Search ── */}
+        {/* â”€â”€ LEFT: Text + Search â”€â”€ */}
         <div className="flex flex-col justify-center">
 
           {/* Badge */}
@@ -76,11 +76,11 @@ export function HeroSection() {
             className="mt-5 max-w-[420px] text-base leading-relaxed text-stone-500"
           >
             Hotels, caterers, banquet halls and event organizers connect to
-            share idle resources — all powered by an AI concierge that
+            share idle resources â€” all powered by an AI concierge that
             searches, compares, and books in seconds.
           </motion.p>
 
-          {/* ─── Airbnb-style search bar ─── */}
+          {/* â”€â”€â”€ Airbnb-style search bar â”€â”€â”€ */}
           <motion.div {...fadeUp(0.34)} className="mt-8">
             <div className={cn(
               "flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white/90 backdrop-blur-md sm:flex-row",
@@ -167,7 +167,7 @@ export function HeroSection() {
             <p className="text-sm text-stone-500">
               Trusted by{" "}
               <span className="font-semibold text-stone-800">200+ businesses</span>
-              {" "}· Pune &amp; Mumbai
+              {" "}Â· Pune &amp; Mumbai
             </p>
           </motion.div>
 
@@ -184,7 +184,7 @@ export function HeroSection() {
                 <TrendingDown className="h-3.5 w-3.5 text-emerald-700" />
               </div>
               <div>
-                <p className="text-xs font-bold text-stone-900">₹4.8L Avg. Savings</p>
+                <p className="text-xs font-bold text-stone-900">â‚¹4.8L Avg. Savings</p>
                 <p className="text-[10px] text-stone-400">per month</p>
               </div>
             </div>
@@ -204,7 +204,7 @@ export function HeroSection() {
           </motion.div>
         </div>
 
-        {/* ── RIGHT: Live marketplace preview card stack ── */}
+        {/* â”€â”€ RIGHT: Live marketplace preview card stack â”€â”€ */}
         <motion.div
           initial={{ opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0 }}
@@ -240,7 +240,7 @@ export function HeroSection() {
         </motion.div>
       </div>
 
-      {/* ─── Bottom fade to next section ─── */}
+      {/* â”€â”€â”€ Bottom fade to next section â”€â”€â”€ */}
       <div
         aria-hidden
         className="pointer-events-none absolute bottom-0 left-0 right-0 z-[2] h-24"
@@ -251,3 +251,4 @@ export function HeroSection() {
     </section>
   );
 }
+
