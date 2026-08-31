@@ -1,0 +1,49 @@
+﻿# ═══════════════════════════════════════════════════════════════
+# HOW TO REMOVE .MD FILES FROM GITHUB (KEEP LOCALLY)
+# ═══════════════════════════════════════════════════════════════
+
+## Step 1: Remove files from Git tracking (but keep locally)
+git rm --cached *.md
+git rm --cached context/*.md -r
+git rm --cached specs/*.md -r
+git rm --cached Six-File+Context+Methodology/*.md -r
+git rm --cached apps/web/CLAUDE.md
+git rm --cached apps/web/AGENTS.md
+
+## Step 2: Re-add README.md (we want to keep this)
+git add README.md
+
+## Step 3: Commit the removal
+git commit -m "chore: remove documentation files from tracking (keep README.md)"
+
+## Step 4: Push to GitHub
+git push origin main
+
+# ═══════════════════════════════════════════════════════════════
+
+## What This Does:
+✅ Removes .md files from Git tracking (won't be pushed anymore)
+✅ Keeps the files on your local computer
+✅ Keeps README.md tracked and pushed
+✅ Future .md files will be ignored automatically
+
+## Files That Will Be Removed from GitHub:
+- AUTH_WIRING_COMPLETE.md
+- CLAUDE.md
+- DASHBOARD_COMPLETE.md
+- DESIGN.md
+- NAVIGATION_FIX_COMPLETE.md
+- pan.md
+- plan.md
+- UNIT_02_COMPLETE.md
+- UNIT_03_COMPLETE.md
+- UNIT_04_COMPLETE.md
+- UNIT_05_COMPLETE.md
+- context/*.md (all files)
+- specs/*.md (all files)
+- Six-File+Context+Methodology/*.md (all files)
+
+## Files That Will STAY on GitHub:
+✅ README.md
+
+# ═══════════════════════════════════════════════════════════════

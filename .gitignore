@@ -112,3 +112,14 @@ apps/api/prisma/dev.db-journal
 .cache/
 tmp/
 temp/
+
+# --- Documentation (exclude temp/generated files) ---
+# Allow only README files
+*.md
+!README.md
+!**/README.md
+
+# Exclude specific documentation folders
+context/
+specs/
+Six-File+Context+Methodology/
