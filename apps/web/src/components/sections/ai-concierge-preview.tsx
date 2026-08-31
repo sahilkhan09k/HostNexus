@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { motion, type Easing } from "framer-motion";
 import { Sparkles, Zap, Clock, ShieldCheck, Bot } from "lucide-react";
@@ -60,7 +60,7 @@ function InlineResourceCard({
     )}>
       <div>
         <p className="text-xs font-semibold text-white">{name}</p>
-        <p className="text-[11px] text-stone-400">{price} · {rating}★</p>
+        <p className="text-[11px] text-stone-400">{price} Â· {rating}â˜…</p>
       </div>
       <span className={cn(
         "rounded-full px-2.5 py-1 text-[10px] font-bold",
@@ -78,7 +78,7 @@ export function AiConciergePreview() {
       <div className="mx-auto max-w-screen-xl px-5 md:px-10 lg:px-16">
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-[60fr_40fr] lg:gap-16 items-center">
 
-          {/* LEFT: Chat mockup — dark card */}
+          {/* LEFT: Chat mockup â€” dark card */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             whileInView={{ opacity: 1, x: 0 }}
@@ -93,7 +93,7 @@ export function AiConciergePreview() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">HostNexus AI Concierge</p>
-                  <p className="text-[11px] text-stone-400">Online · Typically responds instantly</p>
+                  <p className="text-[11px] text-stone-400">Online Â· Typically responds instantly</p>
                 </div>
                 <span className="ml-auto flex h-2 w-2 rounded-full bg-emerald-500" />
               </div>
@@ -104,7 +104,7 @@ export function AiConciergePreview() {
                 <div className="flex justify-end">
                   <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-emerald-600 px-4 py-3">
                     <p className="text-sm text-white">
-                      I need 50 banquet chairs in Koregaon Park this Saturday under ₹8,000
+                      I need 50 banquet chairs in Koregaon Park this Saturday under â‚¹8,000
                     </p>
                   </div>
                 </div>
@@ -123,14 +123,14 @@ export function AiConciergePreview() {
                     {/* Inline resource cards */}
                     <div className="space-y-2">
                       <InlineResourceCard
-                        name="Sarovar Hotels — Banquet Chairs ×80"
-                        price="₹6,500/day"
+                        name="Sarovar Hotels â€” Banquet Chairs Ã—80"
+                        price="â‚¹6,500/day"
                         rating="4.8"
                         available={true}
                       />
                       <InlineResourceCard
-                        name="ITC Maratha — Chair Set ×60"
-                        price="₹7,200/day"
+                        name="ITC Maratha â€” Chair Set Ã—60"
+                        price="â‚¹7,200/day"
                         rating="4.9"
                         available={true}
                       />
@@ -217,7 +217,7 @@ export function AiConciergePreview() {
             </div>
 
             <a
-              href="#ai-concierge"
+              href="/ai-concierge"
               className={cn(
                 "mt-2 self-start rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white",
                 "shadow-[0_2px_8px_rgba(5,150,105,0.25)]",
@@ -233,3 +233,4 @@ export function AiConciergePreview() {
     </section>
   );
 }
+

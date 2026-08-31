@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { motion, useMotionValueEvent, useScroll, type Easing } from "framer-motion";
@@ -62,19 +62,19 @@ export function Navbar() {
           {/* Right CTAs */}
           <div className="flex items-center gap-3">
             <a
-              href="#list"
+              href="/dashboard"
               className="hidden text-sm font-medium text-stone-500 transition-colors duration-150 hover:text-stone-900 md:block"
             >
               List a Resource
             </a>
             <a
-              href="#signin"
+              href="/login"
               className="hidden text-sm font-medium text-stone-500 transition-colors duration-150 hover:text-stone-900 md:block"
             >
               Sign In
             </a>
             <a
-              href="#get-started"
+              href="/register"
               className={cn(
                 "rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white",
                 "shadow-[0_2px_8px_rgba(5,150,105,0.25)]",
@@ -118,13 +118,13 @@ export function Navbar() {
           ))}
           <div className="mt-2 flex gap-2 border-t border-stone-100 pt-3">
             <a
-              href="#signin"
+              href="/login"
               className="flex-1 rounded-xl border border-stone-200 px-4 py-2.5 text-center text-sm font-semibold text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-50"
             >
               Sign In
             </a>
             <a
-              href="#get-started"
+              href="/register"
               className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
             >
               Get Started
@@ -135,3 +135,4 @@ export function Navbar() {
     </>
   );
 }
+

@@ -1,4 +1,5 @@
 import { Navbar } from "@/components/layout/navbar";
+import { Footer } from "@/components/layout/footer";
 import { HeroSection } from "@/components/sections/hero";
 import { StatsBar } from "@/components/sections/stats-bar";
 import { ResourceCategories } from "@/components/sections/resource-categories";
@@ -20,6 +21,7 @@ export default function HomePage() {
         <TrustSection />
         <CtaSection />
       </main>
+      <Footer />
     </div>
   );
 }

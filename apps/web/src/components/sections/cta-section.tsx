@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { motion, type Easing } from "framer-motion";
 import { ArrowRight } from "lucide-react";
@@ -31,14 +31,14 @@ export function CtaSection() {
 
             {/* Subtext */}
             <p className="max-w-lg text-base leading-relaxed text-emerald-100">
-              Whether you have idle banquet space, spare kitchens, or AV equipment — or need
-              them for your next event — HostNexus gets you connected in minutes.
+              Whether you have idle banquet space, spare kitchens, or AV equipment â€” or need
+              them for your next event â€” HostNexus gets you connected in minutes.
             </p>
 
             {/* CTA buttons */}
             <div className="flex flex-col items-center gap-3 sm:flex-row">
               <a
-                href="#list"
+                href="/dashboard"
                 className={cn(
                   "flex items-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-emerald-700",
                   "shadow-[0_4px_16px_rgba(0,0,0,0.12)]",
@@ -50,7 +50,7 @@ export function CtaSection() {
                 <ArrowRight className="h-4 w-4" />
               </a>
               <a
-                href="#marketplace"
+                href="/marketplace"
                 className={cn(
                   "flex items-center gap-2 rounded-xl border-2 border-white/40 px-7 py-3.5 text-sm font-semibold text-white",
                   "hover:border-white/70 hover:bg-white/10",
@@ -63,7 +63,7 @@ export function CtaSection() {
 
             {/* Trust line */}
             <p className="text-xs text-emerald-200">
-              Free to join · No listing fees · Escrow-protected payments
+              Free to join Â· No listing fees Â· Escrow-protected payments
             </p>
           </div>
         </motion.div>
@@ -71,3 +71,4 @@ export function CtaSection() {
     </section>
   );
 }
+
