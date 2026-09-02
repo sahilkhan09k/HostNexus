@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, SlidersHorizontal, LayoutGrid, List, MapPin, X } from "lucide-react";
@@ -69,7 +69,7 @@ const SORT_OPTIONS = [
   { value: "rating",     label: "Highest Rated" },
 ];
 
-export default function MarketplacePage() {
+function MarketplaceContent() {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState(searchParams?.get("q") ?? "");
   const [allResources, setAllResources] = useState<ResourceCardData[]>([]);
@@ -333,5 +333,17 @@ export default function MarketplacePage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function MarketplacePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+      </div>
+    }>
+      <MarketplaceContent />
+    </Suspense>
   );
 }
