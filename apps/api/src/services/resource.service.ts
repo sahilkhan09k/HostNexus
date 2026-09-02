@@ -1,4 +1,4 @@
-import { prisma } from "../config/database.js";
+﻿import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
 
@@ -171,5 +171,41 @@ export class ResourceService {
     }
 
     return await BusinessService.verifyOwnership(resource.businessId, userId);
+  }
+
+  /**
+   * Get all resources from all businesses (Marketplace view)
+   */
+  static async getAllResources(query: ResourceQuery): Promise<(SafeResource & { business?: { id: string; name: string } })[]> {
+    // Build where clause
+    const where: any = {
+      isActive: true, // Only show active resources in marketplace
+    };
+
+    if (query.resourceType) {
+      where.resourceType = query.resourceType;
+    }
+
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    // Get all resources from all businesses
+    const resources = await prisma.resource.findMany({
+      where,
+      include: {
+        business: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return resources;
   }
 }

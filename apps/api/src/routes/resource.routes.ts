@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+﻿import { Router, type IRouter } from "express";
 import { ResourceController } from "../controllers/resource.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 
@@ -10,7 +10,11 @@ router.use(authenticate);
 // Create resource
 router.post("/", ResourceController.createResource);
 
-// Get all resources (with optional filters)
+// Get all resources from all businesses (Marketplace)
+// MUST be before /:id to avoid "all" being treated as an ID
+router.get("/all", ResourceController.getAllResources);
+
+// Get user's own resources (with optional filters)
 router.get("/", ResourceController.getResources);
 
 // Get resource by ID

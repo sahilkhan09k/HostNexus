@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+﻿import express, { type Express } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import healthRoutes from "./routes/health.routes.js";
@@ -6,6 +6,8 @@ import healthDbRoutes from "./routes/health-db.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import businessRoutes from "./routes/business.routes.js";
 import resourceRoutes from "./routes/resource.routes.js";
+import bookingRoutes from "./routes/booking.routes.js";
+import messageRoutes from "./routes/message.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 export function createApp(): Express {
@@ -34,6 +36,8 @@ export function createApp(): Express {
   app.use("/api/auth", authRoutes);
   app.use("/api/business", businessRoutes);
   app.use("/api/resources", resourceRoutes);
+  app.use("/api/bookings", bookingRoutes);
+  app.use("/api/messages", messageRoutes);
 
   // Centralized error handling
   app.use(errorHandler);

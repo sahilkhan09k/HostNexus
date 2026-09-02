@@ -55,7 +55,7 @@ export default function RegisterPage() {
     setError("");
 
     try {
-      await registerUser(form.email, form.password);
+      await registerUser(form.email, form.password, form.businessName);
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
@@ -75,7 +75,7 @@ export default function RegisterPage() {
   return (
     <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)] lg:grid-cols-2">
 
-      {/* â”€â”€ Left branding panel â”€â”€ */}
+      {/* Left branding panel */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-stone-900 p-10 lg:flex">
         <div
           className="absolute inset-0 opacity-[0.06]"
@@ -100,7 +100,7 @@ export default function RegisterPage() {
 
         <div className="relative z-10 space-y-3">
           {[
-            "Free to join â€” no listing fees",
+            "Free to join - no listing fees",
             "AI automatically finds buyers for your resources",
             "Get paid securely with escrow protection",
           ].map((point) => (
@@ -119,7 +119,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* â”€â”€ Right form panel â”€â”€ */}
+      {/* Right form panel */}
       <div className="flex flex-col justify-center p-8 md:p-10">
         <div className="mb-6">
           <h1 className="font-display text-2xl font-bold text-stone-900">
@@ -135,7 +135,7 @@ export default function RegisterPage() {
               </>
             ) : (
               <button type="button" onClick={() => setStep(1)} className="font-medium text-emerald-600 hover:text-emerald-700 transition-colors">
-                â† Back to personal details
+                ← Back to personal details
               </button>
             )}
           </p>
@@ -156,7 +156,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Rajesh Kumar" value={form.name} onChange={set("name")} className={inputCls} />
+                  <input type="text" required placeholder="Your full name" value={form.name} onChange={set("name")} className={inputCls} />
                 </div>
               </div>
 
@@ -204,7 +204,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Name</label>
                 <div className="relative">
                   <Building className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="JW Marriott Pune" value={form.businessName} onChange={set("businessName")} className={inputCls} />
+                  <input type="text" required placeholder="Your business name" value={form.businessName} onChange={set("businessName")} className={inputCls} />
                 </div>
               </div>
 
@@ -266,8 +266,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-
-
-
-
-

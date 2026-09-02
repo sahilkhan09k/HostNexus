@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+﻿import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
@@ -50,7 +50,7 @@ export class AuthService {
   }
 
   /**
-   * Register a new user
+   * Register a new user with business
    */
   static async register(input: RegisterInput): Promise<AuthResponse> {
     // Check if user already exists
@@ -65,12 +65,25 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email: input.email,
-        passwordHash,
-      },
+    // Create user AND business atomically in a transaction
+    const user = await prisma.$transaction(async (tx) => {
+      // Create user
+      const newUser = await tx.user.create({
+        data: {
+          email: input.email,
+          passwordHash,
+        },
+      });
+
+      // Create business for the user with provided business name
+      await tx.business.create({
+        data: {
+          name: input.businessName,
+          ownerId: newUser.id,
+        },
+      });
+
+      return newUser;
     });
 
     // Generate token
