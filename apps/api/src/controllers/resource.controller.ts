@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from "express";
+﻿import type { Request, Response, NextFunction } from "express";
 import { ResourceService } from "../services/resource.service.js";
 import { createResourceSchema, updateResourceSchema, resourceQuerySchema } from "../schemas/resource.schema.js";
 
@@ -221,6 +221,40 @@ export class ResourceController {
       res.status(200).json({
         success: true,
         data: { message: "Resource deleted successfully" },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get all resources from all businesses (Marketplace)
+   * GET /api/resources/all
+   */
+  static async getAllResources(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          error: {
+            code: "UNAUTHORIZED",
+            message: "User not authenticated",
+          },
+        });
+        return;
+      }
+
+      // Validate query parameters
+      const query = resourceQuerySchema.parse(req.query);
+
+      // Get all resources from all businesses
+      const resources = await ResourceService.getAllResources(query);
+
+      res.status(200).json({
+        success: true,
+        data: { resources, count: resources.length },
       });
     } catch (error) {
       next(error);

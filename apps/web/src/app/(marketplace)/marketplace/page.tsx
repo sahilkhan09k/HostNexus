@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, SlidersHorizontal, LayoutGrid, List, MapPin, X } from "lucide-react";
 import { Navbar } from "@/components/layout/navbar";
@@ -9,171 +10,57 @@ import { ResourceCard, type ResourceCardData } from "@/components/marketplace/re
 import { FilterSidebar, type Filters } from "@/components/marketplace/filter-sidebar";
 import { cn } from "@/lib/utils";
 
-/* ── Mock resource data ── */
-const ALL_RESOURCES: ResourceCardData[] = [
-  {
-    id: "1",
-    category: "Banquet Hall",
-    categoryColor: "bg-violet-100 text-violet-700",
-    accentColor: "text-violet-600",
-    title: "Grand Ballroom",
-    business: "JW Marriott Pune",
-    location: "Koregaon Park",
-    price: "₹45,000",
-    unit: "/day",
-    capacity: "500 pax",
-    rating: 4.9,
-    reviews: 38,
-    available: true,
-    availableText: "Available",
-    tags: ["AC Indoor", "AV Included", "Catering"],
-    imageBg: "bg-gradient-to-br from-violet-100 to-indigo-100",
-  },
-  {
-    id: "2",
-    category: "Commercial Kitchen",
-    categoryColor: "bg-amber-100 text-amber-700",
-    accentColor: "text-amber-600",
-    title: "Industrial Production Kitchen",
-    business: "Radisson Blu Pune",
-    location: "Bund Garden Road",
-    price: "₹8,500",
-    unit: "/half-day",
-    capacity: "12 staff",
-    rating: 4.7,
-    reviews: 24,
-    available: true,
-    availableText: "Available",
-    tags: ["Industrial Oven", "Cold Storage", "FSSAI Licensed"],
-    imageBg: "bg-gradient-to-br from-amber-100 to-orange-100",
-  },
-  {
-    id: "3",
-    category: "AV Equipment",
-    categoryColor: "bg-sky-100 text-sky-700",
-    accentColor: "text-sky-600",
-    title: "Full AV Conference Bundle",
-    business: "Fortune Hotels India",
-    location: "Viman Nagar",
-    price: "₹12,000",
-    unit: "/day",
-    capacity: "200 pax",
-    rating: 4.8,
-    reviews: 17,
-    available: false,
-    availableText: "Next Mon",
-    tags: ["4K Projector", "Wireless Mics", "Dolby Sound"],
-    imageBg: "bg-gradient-to-br from-sky-100 to-cyan-100",
-  },
-  {
-    id: "4",
-    category: "Event Space",
-    categoryColor: "bg-rose-100 text-rose-700",
-    accentColor: "text-rose-600",
-    title: "Rooftop Terrace — 5,000 sq.ft",
-    business: "Hyatt Regency Pune",
-    location: "Nagar Road",
-    price: "₹28,000",
-    unit: "/day",
-    capacity: "350 pax",
-    rating: 4.9,
-    reviews: 29,
-    available: true,
-    availableText: "Available",
-    tags: ["Open Air", "City View", "Bar Setup"],
-    imageBg: "bg-gradient-to-br from-rose-100 to-pink-100",
-  },
-  {
-    id: "5",
-    category: "Furniture & Fixtures",
-    categoryColor: "bg-lime-100 text-lime-700",
-    accentColor: "text-lime-600",
-    title: "Premium Chair & Table Set ×200",
-    business: "ITC Maratha Mumbai",
-    location: "Andheri East",
-    price: "₹6,000",
-    unit: "/day",
-    capacity: "200 pax",
-    rating: 4.6,
-    reviews: 41,
-    available: true,
-    availableText: "Available",
-    tags: ["With Delivery", "Setup Included", "Banquet Style"],
-    imageBg: "bg-gradient-to-br from-lime-100 to-green-100",
-  },
-  {
-    id: "6",
-    category: "Vehicle Fleet",
-    categoryColor: "bg-teal-100 text-teal-700",
-    accentColor: "text-teal-600",
-    title: "Luxury Coach Fleet ×4 Buses",
-    business: "Sahara Star Mumbai",
-    location: "Santacruz",
-    price: "₹22,000",
-    unit: "/day",
-    capacity: "160 seats",
+/* ── API types ── */
+interface ApiResource {
+  id: string;
+  name: string;
+  resourceType: string;
+  description: string | null;
+  quantity: number;
+  unit: string | null;
+  location: string | null;
+  isActive: boolean;
+  business: { id: string; name: string };
+}
+
+/* ── Color/gradient map by resourceType ── */
+const TYPE_STYLES: Record<string, { categoryColor: string; accentColor: string; imageBg: string }> = {
+  "Banquet Hall":     { categoryColor: "bg-violet-100 text-violet-700", accentColor: "text-violet-600", imageBg: "bg-gradient-to-br from-violet-100 to-indigo-100" },
+  "Event Space":      { categoryColor: "bg-rose-100 text-rose-700",     accentColor: "text-rose-600",   imageBg: "bg-gradient-to-br from-rose-100 to-pink-100" },
+  "Meeting Space":    { categoryColor: "bg-sky-100 text-sky-700",       accentColor: "text-sky-600",    imageBg: "bg-gradient-to-br from-sky-100 to-cyan-100" },
+  "Kitchen Facility": { categoryColor: "bg-amber-100 text-amber-700",   accentColor: "text-amber-600",  imageBg: "bg-gradient-to-br from-amber-100 to-orange-100" },
+  "AV Equipment":     { categoryColor: "bg-sky-100 text-sky-700",       accentColor: "text-sky-600",    imageBg: "bg-gradient-to-br from-sky-100 to-blue-100" },
+  "Furniture":        { categoryColor: "bg-lime-100 text-lime-700",     accentColor: "text-lime-600",   imageBg: "bg-gradient-to-br from-lime-100 to-green-100" },
+  "Vehicle":          { categoryColor: "bg-teal-100 text-teal-700",     accentColor: "text-teal-600",   imageBg: "bg-gradient-to-br from-teal-100 to-emerald-100" },
+  "Staff/Manpower":   { categoryColor: "bg-indigo-100 text-indigo-700", accentColor: "text-indigo-600", imageBg: "bg-gradient-to-br from-indigo-100 to-purple-100" },
+};
+const DEFAULT_STYLE = {
+  categoryColor: "bg-stone-100 text-stone-700",
+  accentColor: "text-stone-600",
+  imageBg: "bg-gradient-to-br from-stone-100 to-slate-100",
+};
+
+function mapApiResource(resource: ApiResource): ResourceCardData {
+  const style = TYPE_STYLES[resource.resourceType] ?? DEFAULT_STYLE;
+  return {
+    id: resource.id,
+    category: resource.resourceType,
+    categoryColor: style.categoryColor,
+    accentColor: style.accentColor,
+    title: resource.name,
+    business: resource.business.name,
+    location: resource.location || "India",
+    price: resource.unit ? `Per ${resource.unit}` : "Contact for pricing",
+    unit: "",
+    capacity: `${resource.quantity} ${resource.unit || "units"}`,
     rating: 4.5,
-    reviews: 12,
-    available: false,
-    availableText: "Fri onwards",
-    tags: ["AC Coaches", "Licensed Driver", "GPS Tracked"],
-    imageBg: "bg-gradient-to-br from-teal-100 to-emerald-100",
-  },
-  {
-    id: "7",
-    category: "Banquet Hall",
-    categoryColor: "bg-violet-100 text-violet-700",
-    accentColor: "text-violet-600",
-    title: "Crystal Banquet Hall",
-    business: "The Westin Pune",
-    location: "Koregaon Park",
-    price: "₹35,000",
-    unit: "/day",
-    capacity: "400 pax",
-    rating: 4.8,
-    reviews: 52,
-    available: true,
-    availableText: "Available",
-    tags: ["AC Indoor", "Stage Setup", "Valet Parking"],
-    imageBg: "bg-gradient-to-br from-purple-100 to-violet-100",
-  },
-  {
-    id: "8",
-    category: "Commercial Kitchen",
-    categoryColor: "bg-amber-100 text-amber-700",
-    accentColor: "text-amber-600",
-    title: "Commissary Kitchen — 3,000 sq.ft",
-    business: "Courtyard by Marriott",
-    location: "Viman Nagar",
-    price: "₹15,000",
-    unit: "/day",
-    capacity: "20 staff",
-    rating: 4.5,
-    reviews: 9,
-    available: true,
-    availableText: "Available",
-    tags: ["Multiple Stations", "Loading Bay", "Halal Certified"],
-    imageBg: "bg-gradient-to-br from-yellow-100 to-amber-100",
-  },
-  {
-    id: "9",
-    category: "Event Space",
-    categoryColor: "bg-rose-100 text-rose-700",
-    accentColor: "text-rose-600",
-    title: "Heritage Lawns — 2 acres",
-    business: "The Bund Garden Hotel",
-    location: "Bund Garden",
-    price: "₹40,000",
-    unit: "/day",
-    capacity: "600 pax",
-    rating: 4.7,
-    reviews: 33,
-    available: true,
-    availableText: "Available",
-    tags: ["Outdoor", "Generator Backup", "Catering Kitchen"],
-    imageBg: "bg-gradient-to-br from-green-100 to-emerald-100",
-  },
-];
+    reviews: 0,
+    available: resource.isActive,
+    availableText: resource.isActive ? "Available" : "Unavailable",
+    tags: [resource.resourceType],
+    imageBg: style.imageBg,
+  };
+}
 
 const SORT_OPTIONS = [
   { value: "relevance", label: "Most Relevant" },
@@ -183,7 +70,10 @@ const SORT_OPTIONS = [
 ];
 
 export default function MarketplacePage() {
-  const [search, setSearch] = useState("");
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState(searchParams?.get("q") ?? "");
+  const [allResources, setAllResources] = useState<ResourceCardData[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
   const [sort, setSort] = useState("relevance");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -196,9 +86,31 @@ export default function MarketplacePage() {
     ratingMin: 0,
   });
 
+  /* ── Fetch resources from API ── */
+  useEffect(() => {
+    const fetchResources = async () => {
+      setDataLoading(true);
+      try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const token = typeof window !== "undefined" ? localStorage.getItem("hostnexus_token") : null;
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await fetch(`${apiBase}/api/resources/all`, { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        const raw: ApiResource[] = data?.data?.resources ?? [];
+        setAllResources(raw.map(mapApiResource));
+      } catch {
+        // silently fail — filtered will be empty
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    fetchResources();
+  }, []);
+
   /* ── Filter + sort logic ── */
   const filtered = useMemo(() => {
-    let items = ALL_RESOURCES;
+    let items = allResources;
 
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -232,7 +144,7 @@ export default function MarketplacePage() {
     }
 
     return items;
-  }, [search, filters, sort]);
+  }, [search, filters, sort, allResources]);
 
   const activeFilterCount =
     filters.categories.length +
@@ -378,7 +290,14 @@ export default function MarketplacePage() {
 
           {/* ── Resource grid ── */}
           <div className="flex-1 min-w-0">
-            {filtered.length === 0 ? (
+            {dataLoading && (
+              <div className={cn("grid gap-5 mb-8", "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3")}>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="h-64 animate-pulse rounded-2xl bg-stone-100" />
+                ))}
+              </div>
+            )}
+            {!dataLoading && (filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-white py-20 text-center">
                 <Search className="h-10 w-10 text-stone-300" />
                 <p className="mt-4 text-base font-semibold text-stone-600">No resources found</p>
@@ -398,7 +317,7 @@ export default function MarketplacePage() {
                   ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"
                   : "grid-cols-1"
               )}>
-                {filtered.map((resource, i) => (
+                {filtered.map((resource: ResourceCardData, i: number) => (
                   <ResourceCard
                     key={resource.id}
                     data={resource}
@@ -407,7 +326,7 @@ export default function MarketplacePage() {
                   />
                 ))}
               </div>
-            )}
+            ))}
           </div>
         </div>
       </div>

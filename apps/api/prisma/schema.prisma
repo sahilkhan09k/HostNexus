@@ -27,6 +27,11 @@ model Business {
   ownerId   String
   owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   resources Resource[]
+  sentBookingRequests     BookingRequest[] @relation("BookingSeeker")
+  receivedBookingRequests BookingRequest[] @relation("BookingProvider")
+  conversationsAsA Conversation[] @relation("ConversationA")
+  conversationsAsB Conversation[] @relation("ConversationB")
+  sentMessages     Message[]      @relation("MessageSender")
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -45,6 +50,7 @@ model Resource {
   status       String   @default("available")
   location     String?
   isActive     Boolean  @default(true)
+  bookingRequests BookingRequest[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -53,4 +59,69 @@ model Resource {
   @@index([status])
   @@index([isActive])
   @@map("resources")
+}
+
+model BookingRequest {
+  id              String   @id @default(cuid())
+  seekerId        String
+  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Cascade)
+  providerId      String
+  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  resourceId      String
+  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  
+  quantity        Int
+  startDate       DateTime
+  endDate         DateTime
+  totalDays       Int?
+  specialRequests String?
+  
+  status          String   @default("pending") // pending, accepted, rejected, cancelled, completed
+  
+  // Pricing (optional for MVP)
+  proposedPrice   Float?
+  finalPrice      Float?
+  
+  // Rejection/cancellation reason
+  rejectionReason String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([seekerId])
+  @@index([providerId])
+  @@index([resourceId])
+  @@index([status])
+  @@map("booking_requests")
+}
+
+model Conversation {
+  id           String    @id @default(cuid())
+  businessAId  String
+  businessBId  String
+  businessA    Business  @relation("ConversationA", fields: [businessAId], references: [id], onDelete: Cascade)
+  businessB    Business  @relation("ConversationB", fields: [businessBId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([businessAId, businessBId])
+  @@index([businessAId])
+  @@index([businessBId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         Business     @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  content        String
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@map("messages")
 }
