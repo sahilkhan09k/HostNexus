@@ -17,7 +17,7 @@
 
 > **HostNexus** is an AI-powered B2B marketplace that enables hospitality businesses — hotels, restaurants, caterers, banquet venues, resorts, and event organizers — to discover, share, request, negotiate, and coordinate resources with each other in real-time.
 
-**🔗 Live Demo:** [Coming Soon] &nbsp;|&nbsp; **📹 Demo Video:** [Coming Soon] &nbsp;|&nbsp; **📊 Presentation:** [Coming Soon]
+**🔗 Live Demo:** [web-production-7b67e.up.railway.app](https://web-production-7b67e.up.railway.app) &nbsp;|&nbsp; **📹 Demo Video:** [Coming Soon] &nbsp;|&nbsp; **📊 Presentation:** [Coming Soon]
 
 </div>
 
