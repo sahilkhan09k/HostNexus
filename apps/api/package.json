@@ -29,6 +29,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
+    "razorpay": "^2.9.8",
     "zod": "^3.25.76"
   },
   "devDependencies": {
