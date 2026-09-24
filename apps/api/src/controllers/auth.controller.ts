@@ -39,7 +39,7 @@ export class AuthController {
         return;
       }
       const tokens = AuthService.refreshTokens(refreshToken);
-      res.status(200).json({ success: true, data: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } });
+      res.status(200).json({ success: true, data: { token: tokens.accessToken, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } });
     } catch (error) {
       res.status(401).json({ success: false, error: { code: "INVALID_REFRESH_TOKEN", message: error instanceof Error ? error.message : "Invalid token" } });
     }
