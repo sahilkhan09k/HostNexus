@@ -1,9 +1,9 @@
-﻿"use client";
+"use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, type Easing } from "framer-motion";
-import { Eye, EyeOff, Mail, Lock, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight, CheckCircle, AlertCircle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
@@ -18,22 +18,36 @@ const TRUST_POINTS = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
+
+  // Redirect already-authenticated users to dashboard
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // Show nothing while checking auth state
+  if (isLoading) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setErrorCode("");
 
     try {
       await login(email, password);
       router.push("/dashboard");
     } catch (err) {
+      const code = (err as any)?.code ?? "";
+      setErrorCode(code);
       setError(err instanceof Error ? err.message : "Login failed. Please try again.");
     } finally {
       setLoading(false);
@@ -96,13 +110,41 @@ export default function LoginPage() {
               Create one free
             </Link>
           </p>
-        {error && (
-          <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+        </div>
+
+        {/* Error banners */}
+        {error && errorCode === "ACCOUNT_PENDING" && (
+          <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Account pending verification</p>
+              <p className="mt-0.5 text-xs text-amber-700">
+                Our team is reviewing your documents. You&apos;ll be able to log in within 24–48 hours.
+              </p>
+              <Link href="/pending-verification" className="mt-1.5 inline-block text-xs font-semibold text-amber-700 underline hover:text-amber-900">
+                View application status →
+              </Link>
+            </div>
+          </div>
+        )}
+        {error && errorCode === "ACCOUNT_REJECTED" && (
+          <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+            <div>
+              <p className="text-sm font-semibold text-rose-800">Account verification rejected</p>
+              <p className="mt-0.5 text-xs text-rose-700">
+                {error} Please contact{" "}
+                <a href="mailto:support@hostnexus.in" className="font-semibold underline">support@hostnexus.in</a>.
+              </p>
+            </div>
+          </div>
+        )}
+        {error && !errorCode && (
+          <div className="mb-5 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
-        </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Email */}

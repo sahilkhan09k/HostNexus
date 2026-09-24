@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import { User, Building, Bell, Lock, CreditCard, Save, CheckCircle, XCircle } from "lucide-react";
@@ -109,7 +109,7 @@ function ProfileTab() {
 // ── Business Tab ─────────────────────────────────────────────────────────────
 
 function BusinessTab() {
-  const { business } = useAuth();
+  const { business, fetchWithAuth } = useAuth();
   const [businessName, setBusinessName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
@@ -130,19 +130,13 @@ function BusinessTab() {
       showToast("error", "No business found to update.");
       return;
     }
-    const token = AuthService.getToken();
-    if (!token) {
-      showToast("error", "Not authenticated.");
-      return;
-    }
 
     setIsSaving(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/business/${business.id}`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/api/business/${business.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ name: businessName.trim() }),
       });
@@ -154,7 +148,7 @@ function BusinessTab() {
       }
 
       // Refresh stored business
-      await AuthService.fetchAndStoreBusiness(token);
+      await AuthService.fetchAndStoreBusiness();
       showToast("success", "Business name updated successfully.");
     } catch {
       showToast("error", "An unexpected error occurred.");

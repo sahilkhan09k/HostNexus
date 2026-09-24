@@ -20,6 +20,12 @@ describe("useResourceForm", () => {
       unit: "",
       location: "",
       isActive: true,
+      rentAmount: 0,
+      securityDeposit: 0,
+      photos: [],
+      hasPreExistingDamage: false,
+      damageDescription: "",
+      damagePhotos: [],
     });
   });
 
@@ -187,6 +193,12 @@ describe("useResourceForm", () => {
       unit: "",
       location: "",
       isActive: true,
+      rentAmount: 0,
+      securityDeposit: 0,
+      photos: [],
+      hasPreExistingDamage: false,
+      damageDescription: "",
+      damagePhotos: [],
     });
     expect(result.current.errors).toEqual({});
     expect(result.current.touched).toEqual({});

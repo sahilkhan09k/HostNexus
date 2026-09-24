@@ -72,7 +72,7 @@ export class ResourceController {
   }
 
   /**
-   * Get a resource by ID
+   * Get a resource by ID — public read (any authenticated user can view any resource)
    * GET /api/resources/:id
    */
   static async getResourceById(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -81,58 +81,24 @@ export class ResourceController {
       const { id } = req.params;
 
       if (!userId) {
-        res.status(401).json({
-          success: false,
-          error: {
-            code: "UNAUTHORIZED",
-            message: "User not authenticated",
-          },
-        });
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
       if (!id || typeof id !== "string") {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: "INVALID_RESOURCE_ID",
-            message: "Valid resource ID is required",
-          },
-        });
+        res.status(400).json({ success: false, error: { code: "INVALID_RESOURCE_ID", message: "Valid resource ID is required" } });
         return;
       }
 
       const resource = await ResourceService.getResourceById(id);
 
       if (!resource) {
-        res.status(404).json({
-          success: false,
-          error: {
-            code: "RESOURCE_NOT_FOUND",
-            message: "Resource not found",
-          },
-        });
+        res.status(404).json({ success: false, error: { code: "RESOURCE_NOT_FOUND", message: "Resource not found" } });
         return;
       }
 
-      // Verify user has access to this resource
-      const hasAccess = await ResourceService.verifyResourceAccess(id, userId);
-
-      if (!hasAccess) {
-        res.status(403).json({
-          success: false,
-          error: {
-            code: "FORBIDDEN",
-            message: "You do not have access to this resource",
-          },
-        });
-        return;
-      }
-
-      res.status(200).json({
-        success: true,
-        data: { resource },
-      });
+      // No ownership check — any verified user can view any resource
+      res.status(200).json({ success: true, data: { resource } });
     } catch (error) {
       next(error);
     }
@@ -228,7 +194,7 @@ export class ResourceController {
   }
 
   /**
-   * Get all resources from all businesses (Marketplace)
+   * Get all resources from all businesses (Marketplace) — excludes caller's own listings
    * GET /api/resources/all
    */
   static async getAllResources(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -236,26 +202,30 @@ export class ResourceController {
       const userId = req.userId;
 
       if (!userId) {
-        res.status(401).json({
-          success: false,
-          error: {
-            code: "UNAUTHORIZED",
-            message: "User not authenticated",
-          },
-        });
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      // Validate query parameters
       const query = resourceQuerySchema.parse(req.query);
 
-      // Get all resources from all businesses
-      const resources = await ResourceService.getAllResources(query);
+      // Resolve caller's own businessId so we can exclude their listings
+      let excludeBusinessId: string | undefined;
+      try {
+        const { BusinessService } = await import("../services/business.service.js");
+        const biz = await BusinessService.getBusinessByUserId(userId);
+        excludeBusinessId = biz?.id;
+      } catch { /* non-fatal */ }
 
-      res.status(200).json({
-        success: true,
-        data: { resources, count: resources.length },
-      });
+      const resources = await ResourceService.getAllResources(
+        {
+          ...query,
+          startDate: typeof req.query.startDate === "string" ? req.query.startDate : undefined,
+          endDate:   typeof req.query.endDate   === "string" ? req.query.endDate   : undefined,
+        },
+        excludeBusinessId
+      );
+
+      res.status(200).json({ success: true, data: { resources, count: resources.length } });
     } catch (error) {
       next(error);
     }

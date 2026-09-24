@@ -25,6 +25,9 @@
                             "paths":  {
                                           "@/*":  [
                                                       "./src/*"
+                                                  ],
+                                          "@hostnexus/types": [
+                                                      "../../packages/types/src/index.ts"
                                                   ]
                                       }
                         },

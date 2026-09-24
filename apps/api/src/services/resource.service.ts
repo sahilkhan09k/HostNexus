@@ -1,27 +1,12 @@
-﻿import { prisma } from "../config/database.js";
+import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
-
-interface SafeResource {
-  id: string;
-  businessId: string;
-  name: string;
-  description: string | null;
-  resourceType: string;
-  quantity: number;
-  unit: string | null;
-  status: string;
-  location: string | null;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 export class ResourceService {
   /**
    * Create a new resource for a business
    */
-  static async createResource(userId: string, input: CreateResourceInput): Promise<SafeResource> {
+  static async createResource(userId: string, input: CreateResourceInput) {
     // Get user's business
     const business = await BusinessService.getBusinessByUserId(userId);
 
@@ -41,6 +26,12 @@ export class ResourceService {
         status: input.status,
         location: input.location || null,
         isActive: input.isActive,
+        rentAmountPaise: input.rentAmountPaise,
+        securityDepositPaise: input.securityDepositPaise,
+        photos: input.photos || [],
+        hasPreExistingDamage: input.hasPreExistingDamage || false,
+        damageDescription: input.damageDescription || null,
+        damagePhotos: input.damagePhotos || [],
       },
     });
 
@@ -50,7 +41,7 @@ export class ResourceService {
   /**
    * Get all resources with optional filters
    */
-  static async getResources(userId: string, query: ResourceQuery): Promise<SafeResource[]> {
+  static async getResources(userId: string, query: ResourceQuery) {
     // Get user's business
     const business = await BusinessService.getBusinessByUserId(userId);
 
@@ -87,14 +78,32 @@ export class ResourceService {
   }
 
   /**
-   * Get a resource by ID
+   * Get a resource by ID — public read, no ownership check.
+   * Used by marketplace detail pages and the booking flow.
    */
-  static async getResourceById(resourceId: string): Promise<SafeResource | null> {
+  static async getResourceById(resourceId: string) {
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
+      include: {
+        business: {
+          select: { id: true, name: true, ownerId: true, city: true, state: true, businessType: true },
+        },
+        availabilityWindows: {
+          orderBy: { fromDate: "asc" },
+          select: { id: true, fromDate: true, toDate: true, note: true },
+        },
+      },
     });
-
     return resource;
+  }
+
+  /**
+   * Verify if a user OWNS a specific resource (used only by edit/delete).
+   */
+  static async verifyResourceAccess(resourceId: string, userId: string): Promise<boolean> {
+    const resource = await prisma.resource.findUnique({ where: { id: resourceId } });
+    if (!resource) return false;
+    return await BusinessService.verifyOwnership(resource.businessId, userId);
   }
 
   /**
@@ -105,7 +114,7 @@ export class ResourceService {
     resourceId: string,
     userId: string,
     input: UpdateResourceInput
-  ): Promise<SafeResource> {
+  ) {
     // Get resource
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
@@ -159,53 +168,72 @@ export class ResourceService {
   }
 
   /**
-   * Verify if a user can access a specific resource
+   * Get all resources from all businesses (Marketplace view).
+   * Excludes the caller's own business so users can't book their own listings.
    */
-  static async verifyResourceAccess(resourceId: string, userId: string): Promise<boolean> {
-    const resource = await prisma.resource.findUnique({
-      where: { id: resourceId },
-    });
+  static async getAllResources(
+    query: ResourceQuery & { startDate?: string; endDate?: string },
+    excludeBusinessId?: string            // caller's own businessId — excluded from results
+  ) {
+    const where: any = { isActive: true };
+    if (query.resourceType) where.resourceType = query.resourceType;
+    if (query.status)       where.status       = query.status;
 
-    if (!resource) {
-      return false;
+    // Never show the caller's own listings in the marketplace
+    if (excludeBusinessId) {
+      where.businessId = { not: excludeBusinessId };
     }
 
-    return await BusinessService.verifyOwnership(resource.businessId, userId);
-  }
-
-  /**
-   * Get all resources from all businesses (Marketplace view)
-   */
-  static async getAllResources(query: ResourceQuery): Promise<(SafeResource & { business?: { id: string; name: string } })[]> {
-    // Build where clause
-    const where: any = {
-      isActive: true, // Only show active resources in marketplace
-    };
-
-    if (query.resourceType) {
-      where.resourceType = query.resourceType;
+    // Date-availability server-side filter
+    if (query.startDate && query.endDate) {
+      const start = new Date(query.startDate);
+      const end   = new Date(query.endDate);
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        where.availabilityWindows = {
+          some: { fromDate: { lte: start }, toDate: { gte: end } },
+        };
+        where.bookingRequests = {
+          none: {
+            bookingStatus: { notIn: ["CANCELLED", "COMPLETED"] },
+            startDate: { lte: end },
+            endDate:   { gte: start },
+          },
+        };
+      }
     }
 
-    if (query.status) {
-      where.status = query.status;
-    }
-
-    // Get all resources from all businesses
     const resources = await prisma.resource.findMany({
       where,
       include: {
+        availabilityWindows: {
+          orderBy: { fromDate: "asc" },
+          select: { id: true, fromDate: true, toDate: true, note: true },
+        },
         business: {
           select: {
-            id: true,
-            name: true,
+            id: true, name: true, city: true, state: true, businessType: true,
+            reviewsReceived: { select: { rating: true, reviewerRole: true } },
           },
         },
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: { createdAt: "desc" },
     });
 
-    return resources;
+    return resources.map((r) => {
+      const reviews  = r.business.reviewsReceived ?? [];
+      const asOwner  = reviews.filter(rv => rv.reviewerRole === "RENTER");
+      const ownerRating = asOwner.length
+        ? +(asOwner.reduce((s, rv) => s + rv.rating, 0) / asOwner.length).toFixed(1)
+        : null;
+      return {
+        ...r,
+        business: {
+          id: r.business.id, name: r.business.name,
+          city: r.business.city, state: r.business.state,
+          businessType: r.business.businessType,
+          ownerRating, reviewCount: asOwner.length,
+        },
+      };
+    });
   }
 }

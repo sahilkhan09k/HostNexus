@@ -68,7 +68,7 @@ function getUnreadCount(conv: Conversation, myId: string): number {
 // ─── Page Component ───────────────────────────────────────────────────────────
 
 export default function MessagesPage() {
-  const { business } = useAuth();
+  const { business, fetchWithAuth } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -86,12 +86,8 @@ export default function MessagesPage() {
   // ── Fetch conversation list ──────────────────────────────────────────────
 
   const fetchConversations = useCallback(async () => {
-    const token = AuthService.getToken();
-    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`${API_BASE_URL}/api/messages`);
       if (!res.ok) return;
       const data = await res.json();
       setConversations(data.data.conversations ?? []);
@@ -100,7 +96,7 @@ export default function MessagesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchWithAuth]);
 
   useEffect(() => {
     fetchConversations();
@@ -109,19 +105,15 @@ export default function MessagesPage() {
   // ── Fetch messages for selected conversation ─────────────────────────────
 
   const fetchMessages = useCallback(async (conversationId: string) => {
-    const token = AuthService.getToken();
-    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/messages/${conversationId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`${API_BASE_URL}/api/messages/${conversationId}`);
       if (!res.ok) return;
       const data = await res.json();
       setMessages(data.data.messages ?? []);
     } catch {
       // silently fail
     }
-  }, []);
+  }, [fetchWithAuth]);
 
   // ── Polling when a conversation is open ─────────────────────────────────
 
@@ -160,8 +152,6 @@ export default function MessagesPage() {
 
   const sendMessage = async () => {
     if (!input.trim() || !selectedId || sending) return;
-    const token = AuthService.getToken();
-    if (!token) return;
 
     const optimisticMsg: Message = {
       id: `temp-${Date.now()}`,
@@ -179,10 +169,9 @@ export default function MessagesPage() {
     setSending(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/messages/${selectedId}`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/api/messages/${selectedId}`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ content: sentContent }),
@@ -210,12 +199,8 @@ export default function MessagesPage() {
   useEffect(() => {
     if (!showNewMsgModal) return;
     const fetchBusinesses = async () => {
-      const token = AuthService.getToken();
-      if (!token) return;
       try {
-        const res = await fetch(`${API_BASE_URL}/api/resources/all`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetchWithAuth(`${API_BASE_URL}/api/resources/all`);
         if (!res.ok) return;
         const data = await res.json();
         const resources: { business: BusinessSnippet }[] = data?.data?.resources ?? [];
@@ -232,18 +217,16 @@ export default function MessagesPage() {
       } catch { /* silently fail */ }
     };
     fetchBusinesses();
-  }, [showNewMsgModal, business?.id]);
+  }, [showNewMsgModal, business?.id, fetchWithAuth]);
 
   // ── Start conversation ───────────────────────────────────────────────────
 
   const startConversation = async (otherBusinessId: string) => {
-    const token = AuthService.getToken();
-    if (!token) return;
     setStartingConv(otherBusinessId);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/messages/conversations`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/api/messages/conversations`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ otherBusinessId }),
       });
       if (!res.ok) return;

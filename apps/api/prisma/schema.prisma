@@ -14,11 +14,37 @@ model User {
   id           String     @id @default(cuid())
   email        String     @unique
   passwordHash String
+
+  // KYC & verification
+  // verificationStatus: PENDING | VERIFIED | REJECTED
+  verificationStatus String   @default("PENDING")
+  verificationNotes  String?  // admin rejection reason
+
+  // KYC documents (URLs to uploaded files)
+  gstCertificateUrl   String?  // GST Certificate — primary B2B identity doc
+  aadhaarUrl          String?  // Aadhaar — owner identity (fallback: Udyam reg)
+
+  // Owner personal info
+  ownerName  String?
+  phone      String?
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   businesses   Business[]
 
+  @@index([verificationStatus])
   @@map("users")
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("admins")
 }
 
 model Business {
@@ -26,12 +52,25 @@ model Business {
   name      String
   ownerId   String
   owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Business address
+  addressLine String?
+  city        String?
+  state       String?
+  pincode     String?
+
+  // Business type (Hotel, Caterer, etc.)
+  businessType String?
+
   resources Resource[]
   sentBookingRequests     BookingRequest[] @relation("BookingSeeker")
   receivedBookingRequests BookingRequest[] @relation("BookingProvider")
   conversationsAsA Conversation[] @relation("ConversationA")
   conversationsAsB Conversation[] @relation("ConversationB")
   sentMessages     Message[]      @relation("MessageSender")
+  reviewsGiven     Review[]       @relation("ReviewsGiven")
+  reviewsReceived  Review[]       @relation("ReviewsReceived")
+  offersProposed   NegotiationOffer[] @relation("OffersProposed")
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -50,7 +89,17 @@ model Resource {
   status       String   @default("available")
   location     String?
   isActive     Boolean  @default(true)
-  bookingRequests BookingRequest[]
+
+  // Commercial terms & Chain of custody pre-existing conditions (paise: 1 INR = 100 paise)
+  rentAmountPaise       Int      @default(0)
+  securityDepositPaise  Int      @default(0)
+  photos                String[] @default([])
+  hasPreExistingDamage  Boolean  @default(false)
+  damageDescription     String?
+  damagePhotos          String[] @default([])
+
+  bookingRequests    BookingRequest[]
+  availabilityWindows AvailabilityWindow[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -59,6 +108,22 @@ model Resource {
   @@index([status])
   @@index([isActive])
   @@map("resources")
+}
+
+// Owner declares the date ranges during which this resource is available for booking.
+// At least one window must overlap the requested booking dates for a booking to proceed.
+model AvailabilityWindow {
+  id         String   @id @default(cuid())
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  fromDate   DateTime // inclusive start
+  toDate     DateTime // inclusive end
+  note       String?  // optional label e.g. "Available weekdays only"
+  createdAt  DateTime @default(now())
+
+  @@index([resourceId])
+  @@index([fromDate, toDate])
+  @@map("availability_windows")
 }
 
 model BookingRequest {
@@ -76,23 +141,239 @@ model BookingRequest {
   totalDays       Int?
   specialRequests String?
   
-  status          String   @default("pending") // pending, accepted, rejected, cancelled, completed
+  // Dual State Machine (MVP v2)
+  bookingStatus   String   @default("BOOKING_REQUESTED") // BOOKING_REQUESTED, BOOKING_ACCEPTED, HANDOVER_INSPECTION, ACTIVE, RETURN_INITIATED, RETURN_NOT_RECEIVED, OWNER_INSPECTION, DISPUTED, NON_RETURNED, COMPLETED, CANCELLED
+  financialStatus String   @default("PENDING_PAYMENT")  // PENDING_PAYMENT, FUNDS_HELD, RENT_RELEASED, DEPOSIT_HELD, DEPOSIT_REFUNDED, DEPOSIT_TO_OWNER, PARTIAL_SETTLEMENT
   
-  // Pricing (optional for MVP)
+  // Legacy status string bridge
+  status          String   @default("pending")
+
+  // Money in integer paise (₹1 = 100 paise)
+  rentAmountPaise       Int   @default(0)
+  securityDepositPaise  Int   @default(0)
+  totalAmountPaise      Int   @default(0)
+
+  // Legacy prices
   proposedPrice   Float?
   finalPrice      Float?
-  
-  // Rejection/cancellation reason
   rejectionReason String?
-  
+
+  // Commercial & condition snapshot at booking creation
+  conditionSnapshot        Json?
+  listingPhotosSnapshot    String[] @default([])
+  damageDisclosureSnapshot Json?
+  termsVersion             String   @default("v2.0")
+
+  // Timestamps & Server-Enforced Deadlines
+  handoverInitiatedAt      DateTime?
+  renterInspectionDeadline DateTime? // +1 hour from handoverInitiatedAt
+  returnInitiatedAt        DateTime?
+  ownerReceivedAt          DateTime?
+  ownerInspectionDeadline  DateTime? // +2 hours from ownerReceivedAt
+  completedAt              DateTime?
+  nonReturnReportedAt      DateTime?
+
+  // Relations
+  inspections         Inspection[]
+  evidence            Evidence[]
+  damageClaims        DamageClaim[]
+  disputes            Dispute[]
+  paymentTransactions PaymentTransaction[]
+  timelineEvents      BookingTimelineEvent[]
+  reviews             Review[]
+  negotiation         Negotiation?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([seekerId])
   @@index([providerId])
   @@index([resourceId])
+  @@index([bookingStatus])
+  @@index([financialStatus])
   @@index([status])
   @@map("booking_requests")
+}
+
+model Inspection {
+  id            String         @id @default(cuid())
+  bookingId     String
+  booking       BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  type          String         // RECEIVING, RETURN
+  performedById String
+  status        String         // ACCEPTED, REPORTED_ISSUE
+  quantity      Int
+  condition     String?
+  notes         String?
+  evidence      Evidence[]
+  createdAt     DateTime       @default(now())
+
+  @@index([bookingId])
+  @@map("inspections")
+}
+
+model Evidence {
+  id           String          @id @default(cuid())
+  bookingId    String
+  booking      BookingRequest  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  inspectionId String?
+  inspection   Inspection?     @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  uploadedById String
+  stage        String          // PRE_EXISTING, RECEIVING, RETURN, DAMAGE_CLAIM, RENTER_REBUTTAL
+  type         String          @default("IMAGE") // IMAGE, VIDEO
+  fileUrl      String
+  fileHash     String?
+  notes        String?
+  createdAt    DateTime        @default(now())
+
+  @@index([bookingId])
+  @@index([stage])
+  @@map("evidence")
+}
+
+model DamageClaim {
+  id                 String         @id @default(cuid())
+  bookingId          String
+  booking            BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  claimantId         String
+  claimType          String         // DAMAGE, MISSING_ITEM, MISSING_QUANTITY, WRONG_ITEM_RETURNED, SEVERE_STAIN, RETURN_NOT_RECEIVED, OTHER
+  description        String
+  claimedAmountPaise Int            @default(0)
+  status             String         @default("PENDING") // PENDING, DISPUTED, RESOLVED, REJECTED
+  disputes           Dispute[]
+  createdAt          DateTime       @default(now())
+  resolvedAt         DateTime?
+
+  @@index([bookingId])
+  @@map("damage_claims")
+}
+
+model Dispute {
+  id                    String         @id @default(cuid())
+  bookingId             String
+  booking               BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  damageClaimId         String?
+  damageClaim           DamageClaim?   @relation(fields: [damageClaimId], references: [id], onDelete: SetNull)
+  status                String         @default("OPEN") // OPEN, RESOLVED
+  renterResponse        String?
+  renterReason          String?        // PRE_EXISTING_DAMAGE, NOT_CAUSED_BY_RENTER, AFTER_RETURN, NORMAL_WEAR_TEAR, INCORRECT_AMOUNT, OTHER
+  adminDecision         String?        // REFUND_RENTER, PAY_OWNER, PARTIAL_SETTLEMENT, REJECT_CLAIM
+  resolutionAmountPaise Int?
+  resolutionNotes       String?
+  resolvedById          String?
+  resolvedAt            DateTime?
+  createdAt             DateTime       @default(now())
+
+  @@index([bookingId])
+  @@map("disputes")
+}
+
+model PaymentTransaction {
+  id                String         @id @default(cuid())
+  bookingId         String
+  booking           BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  type              String         // ESCROW_DEPOSIT, RENT_PAYOUT, DEPOSIT_REFUND, DAMAGE_PAYOUT, PARTIAL_SETTLEMENT
+  amountPaise       Int
+  status            String         @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  providerReference String?
+  createdAt         DateTime       @default(now())
+
+  @@index([bookingId])
+  @@map("payment_transactions")
+}
+
+model BookingTimelineEvent {
+  id          String         @id @default(cuid())
+  bookingId   String
+  booking     BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  eventType   String         // BOOKING_CREATED, ESCROW_FUNDED, HANDOVER_MARKED, RECEIVING_ACCEPTED, RECEIVING_ISSUE, RETURN_INITIATED, OWNER_RECEIPT_CONFIRMED, OWNER_RETURN_ACCEPTED, DAMAGE_CLAIMED, CLAIM_DISPUTED, DISPUTE_RESOLVED, AUTO_TIMEOUT_RELEASE, NON_RETURN_REPORTED
+  actorId     String?
+  actorRole   String         // OWNER, RENTER, ADMIN, SYSTEM
+  title       String
+  description String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  @@index([bookingId])
+  @@map("booking_timeline_events")
+}
+
+// ─── Review & Reputation ─────────────────────────────────────
+// After a booking reaches COMPLETED status, either party can leave
+// one review per booking per role.
+// reviewerRole: OWNER (provider reviewing seeker) | RENTER (seeker reviewing provider)
+model Review {
+  id         String   @id @default(cuid())
+  bookingId  String
+  booking    BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  reviewerId String   // businessId of the person writing the review
+  reviewer   Business @relation("ReviewsGiven",    fields: [reviewerId], references: [id], onDelete: Cascade)
+  subjectId  String   // businessId of the person being reviewed
+  subject    Business @relation("ReviewsReceived", fields: [subjectId],  references: [id], onDelete: Cascade)
+
+  // reviewerRole: the hat the REVIEWER was wearing in this booking
+  // OWNER  → provider reviewing the seeker  (how was the renter?)
+  // RENTER → seeker reviewing the provider  (how was the owner?)
+  reviewerRole String  // OWNER | RENTER
+
+  rating   Int      // 1–5
+  comment  String?
+
+  createdAt DateTime @default(now())
+
+  // One review per booking per reviewer role
+  @@unique([bookingId, reviewerId, reviewerRole])
+  @@index([subjectId])
+  @@index([reviewerId])
+  @@index([bookingId])
+  @@map("reviews")
+}
+
+// ─── Negotiation ─────────────────────────────────────────────
+// A negotiation lives on a BookingRequest before it is accepted/funded.
+// Either side can make a counter-offer; the thread ends when one side
+// accepts (→ the booking price is updated) or either side rejects.
+model Negotiation {
+  id        String   @id @default(cuid())
+  bookingId String   @unique
+  booking   BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // OPEN | ACCEPTED | REJECTED | CANCELLED
+  status    String   @default("OPEN")
+
+  offers    NegotiationOffer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("negotiations")
+}
+
+model NegotiationOffer {
+  id             String      @id @default(cuid())
+  negotiationId  String
+  negotiation    Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
+
+  // which business made this offer
+  proposerId     String
+  proposer       Business    @relation("OffersProposed", fields: [proposerId], references: [id], onDelete: Cascade)
+
+  // SEEKER (renter) or PROVIDER (owner)
+  proposerRole   String
+
+  // proposed price in paise
+  offeredAmountPaise Int
+
+  message        String?  // optional note with the offer
+
+  // PENDING | COUNTERED | ACCEPTED | REJECTED
+  status         String   @default("PENDING")
+
+  createdAt      DateTime @default(now())
+
+  @@index([negotiationId])
+  @@map("negotiation_offers")
 }
 
 model Conversation {
