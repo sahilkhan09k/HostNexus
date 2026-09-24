@@ -10,13 +10,15 @@ import {
   ownerDamageClaimSchema,
   renterClaimResponseSchema,
   adminResolveDisputeSchema,
+  razorpayVerifySchema,
 } from "../schemas/booking.schema.js";
 
 export class BookingController {
-  /**
-   * Create a new booking request
-   * POST /api/bookings
-   */
+  // ─────────────────────────────────────────────────────────────────────
+  // CRUD — Create / Read
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** POST /api/bookings */
   static async createBookingRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
@@ -28,19 +30,13 @@ export class BookingController {
       const input = createBookingRequestSchema.parse(req.body);
       const bookingRequest = await BookingService.createBookingRequest(userId, input);
 
-      res.status(201).json({
-        success: true,
-        data: { bookingRequest },
-      });
+      res.status(201).json({ success: true, data: { bookingRequest } });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Get all booking requests
-   * GET /api/bookings
-   */
+  /** GET /api/bookings */
   static async getBookingRequests(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
@@ -52,23 +48,17 @@ export class BookingController {
       const query = bookingQuerySchema.parse(req.query);
       const bookingRequests = await BookingService.getBookingRequests(userId, query);
 
-      res.status(200).json({
-        success: true,
-        data: { bookingRequests, count: bookingRequests.length },
-      });
+      res.status(200).json({ success: true, data: { bookingRequests, count: bookingRequests.length } });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Get a booking request by ID
-   * GET /api/bookings/:id
-   */
+  /** GET /api/bookings/:id */
   static async getBookingRequestById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
 
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
@@ -81,23 +71,21 @@ export class BookingController {
         return;
       }
 
-      res.status(200).json({
-        success: true,
-        data: { bookingRequest },
-      });
+      res.status(200).json({ success: true, data: { bookingRequest } });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Update booking status (accept/reject/cancel)
-   * PATCH /api/bookings/:id/status
-   */
+  // ─────────────────────────────────────────────────────────────────────
+  // STATUS TRANSITIONS
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** PATCH /api/bookings/:id/status */
   static async updateBookingStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
@@ -106,33 +94,36 @@ export class BookingController {
       const input = updateBookingStatusSchema.parse(req.body);
       const bookingRequest = await BookingService.updateBookingStatus(id, userId, input);
 
-      res.status(200).json({
-        success: true,
-        data: { bookingRequest },
-      });
+      res.status(200).json({ success: true, data: { bookingRequest } });
     } catch (error) {
       next(error);
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // RAZORPAY PAYMENT — TWO-STEP FLOW
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
-   * Fund Escrow
    * POST /api/bookings/:id/pay
+   * Step 1 — Create a Razorpay order.
+   * Returns { orderId, amount, currency, keyId } for the frontend checkout.
    */
-  static async payEscrow(req: Request, res: Response, next: NextFunction): Promise<void> {
+  static async createPaymentOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const booking = await BookingService.payEscrow(id, userId);
+      const orderDetails = await BookingService.createPaymentOrder(id, userId);
+
       res.status(200).json({
         success: true,
-        data: { booking },
-        message: "Escrow funds held successfully.",
+        data: orderDetails,
+        message: "Razorpay order created. Complete checkout to fund escrow.",
       });
     } catch (error) {
       next(error);
@@ -140,13 +131,49 @@ export class BookingController {
   }
 
   /**
-   * Owner marks resource handed over
-   * POST /api/bookings/:id/handover
+   * POST /api/bookings/:id/pay/verify
+   * Step 2 — Verify Razorpay payment signature and fund escrow.
+   * Body: { razorpayOrderId, razorpayPaymentId, razorpaySignature }
    */
+  static async verifyPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.userId;
+      const id     = req.params.id as string;
+      if (!userId) {
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
+        return;
+      }
+
+      const { razorpayOrderId, razorpayPaymentId, razorpaySignature } =
+        razorpayVerifySchema.parse(req.body);
+
+      const booking = await BookingService.verifyAndFundEscrow(
+        id,
+        userId,
+        razorpayOrderId,
+        razorpayPaymentId,
+        razorpaySignature
+      );
+
+      res.status(200).json({
+        success: true,
+        data: { booking },
+        message: "Payment verified. Escrow funded successfully.",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // HANDOVER & INSPECTION
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** POST /api/bookings/:id/handover */
   static async markHandover(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
@@ -163,46 +190,46 @@ export class BookingController {
     }
   }
 
-  /**
-   * Renter receiving inspection (Accept or Report Issue)
-   * POST /api/bookings/:id/renter-inspection
-   */
+  /** POST /api/bookings/:id/renter-inspection */
   static async renterInspection(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = renterReceivingInspectionSchema.parse(req.body);
+      const input   = renterReceivingInspectionSchema.parse(req.body);
       const booking = await BookingService.renterReceivingInspection(id, userId, input);
 
       res.status(200).json({
         success: true,
         data: { booking },
-        message: input.status === "ACCEPTED" ? "Resource accepted. Rent released to owner." : "Handover issue reported. Dispute opened.",
+        message: input.status === "ACCEPTED"
+          ? "Resource accepted. Rent released to owner."
+          : "Handover issue reported. Dispute opened.",
       });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Renter initiates return
-   * POST /api/bookings/:id/return
-   */
+  // ─────────────────────────────────────────────────────────────────────
+  // RETURN FLOW
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** POST /api/bookings/:id/return */
   static async initiateReturn(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = returnInitiationSchema.parse(req.body);
+      const input   = returnInitiationSchema.parse(req.body);
       const booking = await BookingService.initiateReturn(id, userId, input);
 
       res.status(200).json({
@@ -215,40 +242,36 @@ export class BookingController {
     }
   }
 
-  /**
-   * Owner confirms physical return receipt (Fake Return Protection)
-   * POST /api/bookings/:id/owner-receipt
-   */
+  /** POST /api/bookings/:id/owner-receipt */
   static async ownerReceipt(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = ownerReceiptSchema.parse(req.body);
+      const input   = ownerReceiptSchema.parse(req.body);
       const booking = await BookingService.ownerConfirmReceipt(id, userId, input);
 
       res.status(200).json({
         success: true,
         data: { booking },
-        message: input.received ? "Physical receipt confirmed. 2-hour inspection window active." : "Return reported not received. Incident flagged for customer care.",
+        message: input.received
+          ? "Physical receipt confirmed. 2-hour inspection window active."
+          : "Return reported not received. Dispute filed; sent to Customer Care.",
       });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Owner accepts return condition ("Everything is OK")
-   * POST /api/bookings/:id/owner-accept-return
-   */
+  /** POST /api/bookings/:id/owner-accept-return */
   static async ownerAcceptReturn(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
@@ -265,20 +288,21 @@ export class BookingController {
     }
   }
 
-  /**
-   * Owner submits return damage claim
-   * POST /api/bookings/:id/damage-claim
-   */
+  // ─────────────────────────────────────────────────────────────────────
+  // DAMAGE CLAIMS & DISPUTES
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** POST /api/bookings/:id/damage-claim */
   static async ownerDamageClaim(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = ownerDamageClaimSchema.parse(req.body);
+      const input   = ownerDamageClaimSchema.parse(req.body);
       const booking = await BookingService.ownerSubmitDamageClaim(id, userId, input);
 
       res.status(200).json({
@@ -291,46 +315,42 @@ export class BookingController {
     }
   }
 
-  /**
-   * Renter responds to damage claim (Accept or Dispute)
-   * POST /api/bookings/:id/claim-response
-   */
+  /** POST /api/bookings/:id/claim-response */
   static async renterRespondClaim(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = renterClaimResponseSchema.parse(req.body);
+      const input   = renterClaimResponseSchema.parse(req.body);
       const booking = await BookingService.renterRespondClaim(id, userId, input);
 
       res.status(200).json({
         success: true,
         data: { booking },
-        message: input.action === "ACCEPT" ? "Claim accepted and settled." : "Claim disputed. Sent to Customer Care.",
+        message: input.action === "ACCEPT"
+          ? "Claim accepted and settled."
+          : "Claim disputed. Sent to Customer Care.",
       });
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * Customer Care / Admin resolves dispute
-   * POST /api/bookings/:id/resolve-dispute
-   */
+  /** POST /api/bookings/:id/resolve-dispute */
   static async adminResolveDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
       }
 
-      const input = adminResolveDisputeSchema.parse(req.body);
+      const input   = adminResolveDisputeSchema.parse(req.body);
       const booking = await BookingService.adminResolveDispute(id, userId, input);
 
       res.status(200).json({
@@ -343,14 +363,11 @@ export class BookingController {
     }
   }
 
-  /**
-   * Report non-return
-   * POST /api/bookings/:id/non-return
-   */
+  /** POST /api/bookings/:id/non-return */
   static async reportNonReturn(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.userId;
-      const id = req.params.id as string;
+      const id     = req.params.id as string;
       if (!userId) {
         res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
         return;
@@ -360,7 +377,7 @@ export class BookingController {
       res.status(200).json({
         success: true,
         data: { booking },
-        message: "Non-return reported. Security deposit retained.",
+        message: "Non-return reported. Dispute filed and sent to Customer Care.",
       });
     } catch (error) {
       next(error);
