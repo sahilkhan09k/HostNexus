@@ -1,62 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertCircle, Loader2, X } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { AlertCircle, AlertTriangle, CheckCircle2, DollarSign, Info, Loader2, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RESOURCE_TYPES } from "@/schemas/resource.schema";
-import { useResourceForm } from "../_hooks/use-resource-form";
-
-// ─── Props ────────────────────────────────────────────────────────────────────
+import { useResourceForm, type FormValues } from "../_hooks/use-resource-form";
+import { ImageUploader } from "@/components/ui/image-uploader";
+import AvailabilityManager, { type AvailabilityManagerHandle } from "@/components/ui/availability-manager";
 
 export interface ResourceFormProps {
-  /** Called after a resource is successfully created. */
-  onSuccess?: () => void;
-  /** Called when the user wants to discard the form. */
+  onSuccess?: (resourceId?: string) => void;
   onCancel?: () => void;
-  /**
-   * Called whenever the form's dirty state changes.
-   * Allows parent pages to react to unsaved-changes state (Task 6.1).
-   */
   onDirtyChange?: (isDirty: boolean) => void;
+  initialValues?: Partial<FormValues>;
+  resourceId?: string;
+  submitButtonText?: string;
 }
-
-// ─── Shared input class ───────────────────────────────────────────────────────
 
 const INPUT_BASE =
   "w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm text-stone-800 placeholder:text-stone-400 focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed";
 
-const INPUT_ERROR =
-  "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20";
-
-const LABEL_BASE =
-  "block text-xs font-semibold uppercase tracking-wider text-stone-500 mb-1.5";
-
+const INPUT_ERROR = "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20";
+const LABEL_BASE = "block text-xs font-semibold uppercase tracking-wider text-stone-600 mb-1.5";
 const ERROR_BASE = "text-rose-600 text-xs mt-1";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+export default function ResourceForm({
+  onSuccess,
+  onCancel,
+  onDirtyChange,
+  initialValues,
+  resourceId,
+  submitButtonText = "Create Resource",
+}: ResourceFormProps) {
+  const availabilityRef = useRef<AvailabilityManagerHandle>(null);
 
-/**
- * ResourceForm
- *
- * Controlled form for creating a new resource listing.
- * All form state management is delegated to the `useResourceForm` hook.
- *
- * @param props - Component props.
- * @param props.onSuccess - Called after a resource is successfully created.
- *   Typically triggers a success banner and redirect in the parent page.
- * @param props.onCancel - Called when the user clicks the Cancel button.
- *   The parent page decides whether to navigate immediately or show a
- *   confirmation dialog based on dirty state.
- * @param props.onDirtyChange - Called whenever the form's dirty state changes.
- *   Passes `true` when any field differs from its default; `false` after a
- *   reset or successful submission. Allows the parent to mount a
- *   `beforeunload` guard (Requirement 14.1).
- * @returns The rendered form card with all resource fields, inline validation
- *   feedback, a dismissible error banner, and action buttons.
- *
- * Requirements: 11.1, 11.2, 11.4
- */
-export default function ResourceForm({ onSuccess, onCancel, onDirtyChange }: ResourceFormProps) {
   const {
     values,
     errors,
@@ -66,339 +43,377 @@ export default function ResourceForm({ onSuccess, onCancel, onDirtyChange }: Res
     isDirty,
     handleChange,
     handleBlur,
-    handleSubmit,
-  } = useResourceForm({ onSuccess });
+    handleSubmit: _handleSubmit,
+  } = useResourceForm({
+    onSuccess: async (newId) => {
+      // After resource is saved, persist availability windows
+      const rid = newId ?? resourceId;
+      if (rid && availabilityRef.current) {
+        try { await availabilityRef.current.saveToApi(rid); } catch { /* non-fatal */ }
+      }
+      onSuccess?.(newId);
+    },
+    initialValues,
+    resourceId,
+  });
 
-  // ── Notify parent when dirty state changes (Task 6.1) ─────────────────────
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
-  // ── Local dismissal state for the submit error banner ──────────────────────
-  // Resets to false whenever a new submitError arrives so the banner re-appears.
   const [errorDismissed, setErrorDismissed] = useState(false);
-
   useEffect(() => {
-    if (submitError) {
-      setErrorDismissed(false);
-    }
+    if (submitError) setErrorDismissed(false);
   }, [submitError]);
 
-  const showErrorBanner = !!submitError && !errorDismissed;
-
   return (
-    // ── Outer card (Requirement 11.4) ──────────────────────────────────────
-    <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_2px_12px_-2px_rgba(0,0,0,0.06)] w-full">
-
-      {/* ── Section heading ─────────────────────────────────────────────── */}
-      <h2 className="text-base font-semibold text-stone-900 mb-6">
-        Resource Details
-      </h2>
-
-      {/* ── Task 4.9 — Error notification (above fields) ─────────────────── */}
-      {showErrorBanner && (
-        <div
-          role="alert"
-          className="rounded-xl border border-rose-200 bg-rose-50 p-4 flex items-start gap-3 mb-6"
-        >
-          <AlertCircle className="h-4 w-4 text-rose-600 mt-0.5 shrink-0" aria-hidden="true" />
-          <p className="text-sm text-rose-700 flex-1">{submitError}</p>
+    <form onSubmit={_handleSubmit} className="space-y-8 w-full max-w-4xl mx-auto">
+      {submitError && !errorDismissed && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm text-rose-800">{submitError}</div>
           <button
             type="button"
             aria-label="Dismiss error"
             onClick={() => setErrorDismissed(true)}
-            className="shrink-0 rounded text-rose-400 hover:text-rose-600 focus:outline-none focus:ring-1 focus:ring-rose-400/50 transition-colors"
+            className="text-rose-500 hover:text-rose-700"
           >
-            <X className="h-4 w-4" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} noValidate>
-        {/* ── Task 4.10 — All fields wrapped in space-y-5 ─────────────────── */}
-        <div className="space-y-5">
+      {/* ── 1. Basic Details Card ────────────────────────────────────── */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
+        <div className="border-b border-stone-100 pb-4">
+          <h2 className="text-base font-semibold text-stone-900">Resource Details</h2>
+          <p className="text-xs text-stone-500 mt-0.5">Describe your physical resource and its category.</p>
+        </div>
 
-          {/* ── Task 4.2 — Resource Type selector ──────────────────────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <label htmlFor="name" className={LABEL_BASE}>Resource Name *</label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              placeholder="e.g. 50-KVA Silent Diesel Generator, 100 Banquet Chairs"
+              value={values.name}
+              disabled={isSubmitting}
+              onChange={(e) => handleChange("name", e.target.value)}
+              onBlur={() => handleBlur("name")}
+              className={cn(INPUT_BASE, touched.name && errors.name && INPUT_ERROR)}
+            />
+            {touched.name && errors.name && <p className={ERROR_BASE}>{errors.name}</p>}
+          </div>
+
           <div>
-            <label htmlFor="resourceType" className={LABEL_BASE}>
-              Resource Category <span className="text-rose-500">*</span>
-            </label>
+            <label htmlFor="resourceType" className={LABEL_BASE}>Resource Category *</label>
             <select
               id="resourceType"
               name="resourceType"
               value={values.resourceType}
+              disabled={isSubmitting}
               onChange={(e) => handleChange("resourceType", e.target.value)}
               onBlur={() => handleBlur("resourceType")}
-              disabled={isSubmitting}
-              aria-invalid={touched.resourceType && !!errors.resourceType}
-              aria-describedby={
-                touched.resourceType && errors.resourceType
-                  ? "resourceType-error"
-                  : undefined
-              }
-              className={cn(
-                INPUT_BASE,
-                "appearance-none cursor-pointer",
-                touched.resourceType && errors.resourceType && INPUT_ERROR
-              )}
+              className={cn(INPUT_BASE, touched.resourceType && errors.resourceType && INPUT_ERROR)}
             >
-              <option value="" disabled>
-                Select a category
-              </option>
+              <option value="">Select Category</option>
               {RESOURCE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
+                <option key={type} value={type}>{type}</option>
               ))}
             </select>
-            {touched.resourceType && errors.resourceType && (
-              <p id="resourceType-error" className={ERROR_BASE} role="alert">
-                {errors.resourceType}
-              </p>
-            )}
+            {touched.resourceType && errors.resourceType && <p className={ERROR_BASE}>{errors.resourceType}</p>}
           </div>
 
-          {/* ── Task 4.3 — Resource Name input ──────────────────────────────── */}
           <div>
-            <label htmlFor="name" className={LABEL_BASE}>
-              Resource Name <span className="text-rose-500">*</span>
-            </label>
+            <label htmlFor="location" className={LABEL_BASE}>Storage / Pickup Location</label>
             <input
+              id="location"
+              name="location"
               type="text"
-              id="name"
-              name="name"
-              value={values.name}
-              onChange={(e) => handleChange("name", e.target.value)}
-              onBlur={() => handleBlur("name")}
+              placeholder="e.g. Mumbai, Andheri East Warehouse"
+              value={values.location}
               disabled={isSubmitting}
-              placeholder="e.g., Grand Banquet Hall"
-              autoComplete="off"
-              aria-invalid={touched.name && !!errors.name}
-              aria-describedby={
-                touched.name && errors.name ? "name-error" : undefined
-              }
-              className={cn(
-                INPUT_BASE,
-                touched.name && errors.name && INPUT_ERROR
-              )}
+              onChange={(e) => handleChange("location", e.target.value)}
+              onBlur={() => handleBlur("location")}
+              className={INPUT_BASE}
             />
-            {touched.name && errors.name && (
-              <p id="name-error" className={ERROR_BASE} role="alert">
-                {errors.name}
-              </p>
-            )}
           </div>
 
-          {/* ── Task 4.4 — Description textarea ─────────────────────────────── */}
           <div>
-            <label htmlFor="description" className={LABEL_BASE}>
-              Description{" "}
-              <span className="text-stone-400 font-normal normal-case tracking-normal">(optional)</span>
-            </label>
+            <label htmlFor="quantity" className={LABEL_BASE}>Available Quantity *</label>
+            <input
+              id="quantity"
+              name="quantity"
+              type="number"
+              min="1"
+              max="10000"
+              value={values.quantity}
+              disabled={isSubmitting}
+              onChange={(e) => handleChange("quantity", parseInt(e.target.value, 10) || 1)}
+              onBlur={() => handleBlur("quantity")}
+              className={cn(INPUT_BASE, touched.quantity && errors.quantity && INPUT_ERROR)}
+            />
+            {touched.quantity && errors.quantity && <p className={ERROR_BASE}>{errors.quantity}</p>}
+          </div>
+
+          <div>
+            <label htmlFor="unit" className={LABEL_BASE}>Unit of Measure</label>
+            <input
+              id="unit"
+              name="unit"
+              type="text"
+              placeholder="e.g. units, pieces, sets, hours"
+              value={values.unit}
+              disabled={isSubmitting}
+              onChange={(e) => handleChange("unit", e.target.value)}
+              onBlur={() => handleBlur("unit")}
+              className={INPUT_BASE}
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="description" className="text-xs font-semibold uppercase tracking-wider text-stone-600">
+                Description & Technical Specifications
+              </label>
+              <span className="text-xs text-stone-400">
+                {values.description?.length || 0}/1000
+              </span>
+            </div>
             <textarea
               id="description"
               name="description"
-              rows={4}
+              rows={3}
+              maxLength={1000}
+              placeholder="Provide specifications, dimensions, power requirements, or handling instructions..."
               value={values.description}
+              disabled={isSubmitting}
               onChange={(e) => handleChange("description", e.target.value)}
               onBlur={() => handleBlur("description")}
-              disabled={isSubmitting}
-              placeholder="Describe your resource in detail..."
-              maxLength={1000}
-              aria-invalid={touched.description && !!errors.description}
-              aria-describedby={
-                touched.description && errors.description
-                  ? "description-error description-counter"
-                  : "description-counter"
-              }
-              className={cn(
-                INPUT_BASE,
-                "resize-none",
-                touched.description && errors.description && INPUT_ERROR
-              )}
+              className={INPUT_BASE}
             />
-            <div className="flex items-center justify-between mt-1">
-              {touched.description && errors.description ? (
-                <p id="description-error" className={ERROR_BASE} role="alert">
-                  {errors.description}
-                </p>
-              ) : (
-                <span />
-              )}
-              <p
-                id="description-counter"
-                aria-live="polite"
-                className={cn(
-                  "text-xs tabular-nums text-stone-400",
-                  values.description.length > 950 && "text-amber-500",
-                  values.description.length >= 1000 && "text-rose-500"
-                )}
-              >
-                {values.description.length}/1000
+          </div>
+
+          {/* Active Listing Toggle */}
+          <div className="sm:col-span-2 flex items-center justify-between p-4 rounded-xl border border-stone-200 bg-stone-50">
+            <div>
+              <label htmlFor="isActive" className="text-sm font-semibold text-stone-900 block">
+                List on Marketplace
+              </label>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Make this resource immediately discoverable and bookable.
               </p>
             </div>
-          </div>
-
-          {/* ── Task 4.5 — Quantity + Unit (2-col grid) ──────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Quantity */}
-            <div>
-              <label htmlFor="quantity" className={LABEL_BASE}>
-                Available Quantity <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="number"
-                id="quantity"
-                name="quantity"
-                min={1}
-                max={10000}
-                step={1}
-                value={values.quantity}
-                onChange={(e) =>
-                  handleChange("quantity", parseInt(e.target.value, 10) || 1)
-                }
-                onBlur={() => handleBlur("quantity")}
-                disabled={isSubmitting}
-                aria-invalid={touched.quantity && !!errors.quantity}
-                aria-describedby={
-                  touched.quantity && errors.quantity
-                    ? "quantity-error"
-                    : undefined
-                }
-                className={cn(
-                  INPUT_BASE,
-                  touched.quantity && errors.quantity && INPUT_ERROR
-                )}
-              />
-              {touched.quantity && errors.quantity && (
-                <p id="quantity-error" className={ERROR_BASE} role="alert">
-                  {errors.quantity}
-                </p>
-              )}
-            </div>
-
-            {/* Unit */}
-            <div>
-              <label htmlFor="unit" className={LABEL_BASE}>
-                Unit{" "}
-                <span className="text-stone-400 font-normal normal-case tracking-normal">(optional)</span>
-              </label>
-              <input
-                type="text"
-                id="unit"
-                name="unit"
-                value={values.unit}
-                onChange={(e) => handleChange("unit", e.target.value)}
-                onBlur={() => handleBlur("unit")}
-                disabled={isSubmitting}
-                placeholder="e.g., seats, hours, pieces"
-                aria-invalid={touched.unit && !!errors.unit}
-                aria-describedby={
-                  touched.unit && errors.unit ? "unit-error" : undefined
-                }
-                className={cn(
-                  INPUT_BASE,
-                  touched.unit && errors.unit && INPUT_ERROR
-                )}
-              />
-              {touched.unit && errors.unit && (
-                <p id="unit-error" className={ERROR_BASE} role="alert">
-                  {errors.unit}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* ── Task 4.6 — Location input ────────────────────────────────────── */}
-          <div>
-            <label htmlFor="location" className={LABEL_BASE}>
-              Location{" "}
-              <span className="text-stone-400 font-normal normal-case tracking-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              id="location"
-              name="location"
-              value={values.location}
-              onChange={(e) => handleChange("location", e.target.value)}
-              onBlur={() => handleBlur("location")}
-              disabled={isSubmitting}
-              placeholder="e.g., Mumbai, Maharashtra"
-              aria-invalid={touched.location && !!errors.location}
-              aria-describedby={
-                touched.location && errors.location ? "location-error" : undefined
-              }
-              className={cn(
-                INPUT_BASE,
-                touched.location && errors.location && INPUT_ERROR
-              )}
-            />
-            {touched.location && errors.location && (
-              <p id="location-error" className={ERROR_BASE} role="alert">
-                {errors.location}
-              </p>
-            )}
-          </div>
-
-          {/* ── Task 4.7 — Active Status toggle ──────────────────────────────── */}
-          <div className="flex items-start gap-4">
             <button
               type="button"
+              id="isActive"
               role="switch"
               aria-checked={values.isActive}
               aria-label="List on Marketplace"
               onClick={() => handleChange("isActive", !values.isActive)}
               disabled={isSubmitting}
               className={cn(
-                "relative inline-flex w-11 h-6 shrink-0 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50",
-                values.isActive ? "bg-emerald-600" : "bg-stone-200"
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2",
+                values.isActive ? "bg-emerald-600" : "bg-stone-300"
               )}
             >
               <span
-                aria-hidden="true"
                 className={cn(
-                  "inline-block w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 mt-0.5",
-                  values.isActive ? "translate-x-5" : "translate-x-0.5"
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  values.isActive ? "translate-x-5" : "translate-x-0"
                 )}
               />
             </button>
-            <div>
-              <p className="text-sm font-medium text-stone-700 leading-none mb-1">
-                List on Marketplace
-              </p>
-              <p className="text-xs text-stone-500 leading-relaxed">
-                When enabled, your resource will be visible to all businesses
-              </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 2. Commercial Pricing & Security Deposit (MVP v2) ────────── */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
+        <div className="border-b border-stone-100 pb-4">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-base font-semibold text-stone-900">Commercial Pricing & Escrow Terms</h2>
+          </div>
+          <p className="text-xs text-stone-500 mt-0.5">
+            Rent and refundable security deposits are held in platform escrow until inspection confirmation.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="rentAmount" className={LABEL_BASE}>Daily Rental Price (₹ INR) *</label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
+              <input
+                id="rentAmount"
+                name="rentAmount"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={values.rentAmount || ""}
+                disabled={isSubmitting}
+                onChange={(e) => handleChange("rentAmount", parseFloat(e.target.value) || 0)}
+                onBlur={() => handleBlur("rentAmount")}
+                className={cn(INPUT_BASE, "pl-8", touched.rentAmount && errors.rentAmount && INPUT_ERROR)}
+              />
             </div>
+            {touched.rentAmount && errors.rentAmount && <p className={ERROR_BASE}>{errors.rentAmount}</p>}
+            <p className="text-[11px] text-stone-400 mt-1">Per day or billing cycle per unit.</p>
           </div>
 
-        </div>{/* /space-y-5 */}
-
-        {/* ── Task 4.8 — Cancel + Submit buttons ──────────────────────────── */}
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-6 mt-6 border-t border-stone-100">
-          {/* Cancel */}
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSubmitting}
-            className="rounded-xl border border-stone-200 bg-white px-5 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50 transition-all disabled:opacity-50"
-          >
-            Cancel
-          </button>
-
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(5,150,105,0.25)] hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {isSubmitting && (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            {isSubmitting ? "Creating..." : "Create Resource"}
-          </button>
+          <div>
+            <label htmlFor="securityDeposit" className={LABEL_BASE}>Refundable Security Deposit (₹ INR) *</label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
+              <input
+                id="securityDeposit"
+                name="securityDeposit"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={values.securityDeposit || ""}
+                disabled={isSubmitting}
+                onChange={(e) => handleChange("securityDeposit", parseFloat(e.target.value) || 0)}
+                onBlur={() => handleBlur("securityDeposit")}
+                className={cn(INPUT_BASE, "pl-8", touched.securityDeposit && errors.securityDeposit && INPUT_ERROR)}
+              />
+            </div>
+            {touched.securityDeposit && errors.securityDeposit && <p className={ERROR_BASE}>{errors.securityDeposit}</p>}
+            <p className="text-[11px] text-stone-400 mt-1">Held in escrow; auto-released 2h after return if no damage reported.</p>
+          </div>
         </div>
-      </form>
-    </div>
+
+        {/* Guideline recommendation note */}
+        <div className="rounded-xl border border-amber-200/80 bg-amber-50/70 p-3.5 flex items-start gap-3 text-xs text-amber-900">
+          <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold">Platform Recommendation:</span> Keep the security deposit reasonable and proportionate to the resource's replacement value. High deposits can reduce renter booking conversions.
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3. Resource Showcase Gallery ──────────────────────────────── */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-4">
+        <div className="border-b border-stone-100 pb-4">
+          <h2 className="text-base font-semibold text-stone-900">Showcase Photos</h2>
+          <p className="text-xs text-stone-500 mt-0.5">High-resolution photos showcasing the general appearance and condition.</p>
+        </div>
+
+        <ImageUploader
+          value={values.photos}
+          onChange={(urls) => handleChange("photos", urls)}
+          maxFiles={8}
+          label="Resource Gallery Images"
+          description="Upload front, side, and operational views"
+        />
+      </div>
+
+      {/* ── 4. Digital Chain of Custody: Pre-Existing Damage Disclosure ── */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
+        <div className="border-b border-stone-100 pb-4 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              <h2 className="text-base font-semibold text-stone-900">Pre-Existing Wear & Damage Disclosure</h2>
+            </div>
+            <p className="text-xs text-stone-500 mt-0.5">
+              Digital Chain of Custody: Disclosing pre-existing condition prevents disputes upon return.
+            </p>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={values.hasPreExistingDamage}
+              onChange={(e) => handleChange("hasPreExistingDamage", e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+            <span className="ml-3 text-xs font-semibold text-stone-700">
+              {values.hasPreExistingDamage ? "Has Pre-Existing Wear" : "Pristine / No Damage"}
+            </span>
+          </label>
+        </div>
+
+        {values.hasPreExistingDamage ? (
+          <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <div className="flex items-start gap-2.5 text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p>
+                Declare any pre-existing scratches, stains, dents, or operational quirks. This disclosure becomes part of the immutable booking snapshot and protects both parties.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="damageDescription" className={LABEL_BASE}>
+                Detailed Description of Existing Wear *
+              </label>
+              <textarea
+                id="damageDescription"
+                name="damageDescription"
+                rows={3}
+                placeholder="e.g. Scratch on left aluminum casing; small stain on seat fabric #12; minor dent on bottom rim."
+                value={values.damageDescription}
+                onChange={(e) => handleChange("damageDescription", e.target.value)}
+                onBlur={() => handleBlur("damageDescription")}
+                className={cn(INPUT_BASE, "bg-white", touched.damageDescription && errors.damageDescription && INPUT_ERROR)}
+              />
+              {touched.damageDescription && errors.damageDescription && (
+                <p className={ERROR_BASE}>{errors.damageDescription}</p>
+              )}
+            </div>
+
+            <ImageUploader
+              value={values.damagePhotos}
+              onChange={(urls) => handleChange("damagePhotos", urls)}
+              maxFiles={6}
+              label="Damage & Wear Photos (Required) *"
+              description="Capture close-up photos highlighting the pre-existing wear or blemishes"
+            />
+            {touched.damagePhotos && errors.damagePhotos && (
+              <p className={ERROR_BASE}>{errors.damagePhotos}</p>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 flex items-center gap-3 text-xs text-emerald-900">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <span className="font-semibold">Declared Pristine Condition:</span> You declare this resource is in good operating condition with no notable defects. Renters will verify this condition upon handover.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 5. Availability Windows ──────────────────────────────── */}
+      <AvailabilityManager
+        ref={availabilityRef}
+        resourceId={resourceId}
+      />
+
+      {/* ── 6. Action Buttons ────────────────────────────────────────── */}
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="rounded-xl border border-stone-200 px-5 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors disabled:opacity-50"
+        >
+          {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+          <span>{isSubmitting ? (resourceId ? "Saving..." : "Creating...") : submitButtonText}</span>
+        </button>
+      </div>
+    </form>
   );
 }

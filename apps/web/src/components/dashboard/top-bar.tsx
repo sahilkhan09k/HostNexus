@@ -14,19 +14,16 @@ export function TopBar() {
   const [pendingCount, setPendingCount] = useState(0);
 
   const fetchPendingCount = useCallback(async () => {
-    const token = AuthService.getToken();
-    if (!token) return;
+    if (!AuthService.getAccessToken()) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/bookings?type=incoming`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings?type=incoming`);
       if (!res.ok) return;
       const data = await res.json();
-      // Count bookings with status PENDING
+      // Count bookings with status pending
       const bookings: { status: string }[] = data?.data?.bookings ?? data?.data ?? [];
       const pending = Array.isArray(bookings)
-        ? bookings.filter((b) => b.status === "PENDING").length
+        ? bookings.filter((b) => b.status?.toLowerCase() === "pending").length
         : 0;
       setPendingCount(pending);
     } catch {

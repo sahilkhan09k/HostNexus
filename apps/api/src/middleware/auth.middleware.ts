@@ -47,7 +47,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
     const token = parts[1];
 
-    // Verify token
+    // Verify access token (short-lived, signed with JWT_SECRET)
     const payload = AuthService.verifyToken(token);
 
     // Attach user ID to request

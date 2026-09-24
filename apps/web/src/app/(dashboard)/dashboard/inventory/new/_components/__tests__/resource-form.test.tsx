@@ -15,9 +15,19 @@ import { useResourceForm } from "../../_hooks/use-resource-form";
 
 vi.mock("lucide-react", () => ({
   AlertCircle: () => null,
-  Loader2: () => null,
-  X: () => null,
+  AlertTriangle: () => null,
   CheckCircle2: () => null,
+  DollarSign: () => null,
+  Info: () => null,
+  Loader2: () => null,
+  ShieldCheck: () => null,
+  Shield: () => null,
+  Camera: () => null,
+  X: () => null,
+}));
+
+vi.mock("@/components/ui/image-uploader", () => ({
+  ImageUploader: () => <div data-testid="image-uploader" />,
 }));
 
 vi.mock("../../_hooks/use-resource-form", () => ({
@@ -42,6 +52,12 @@ const defaultMockReturn = {
     unit: "",
     location: "",
     isActive: true,
+    rentAmount: 0,
+    securityDeposit: 0,
+    photos: [],
+    hasPreExistingDamage: false,
+    damageDescription: "",
+    damagePhotos: [],
   },
   errors: {},
   touched: {},

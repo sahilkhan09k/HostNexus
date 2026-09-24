@@ -49,17 +49,6 @@ export default function NewResourcePage() {
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace("/login");
-      return;
-    }
-    // Fallback: check localStorage token directly
-    if (!isLoading) {
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("hostnexus_token")
-          : null;
-      if (!token) {
-        router.replace("/login");
-      }
     }
   }, [isLoading, isAuthenticated, router]);
 

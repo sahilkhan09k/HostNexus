@@ -43,6 +43,11 @@ function validInput() {
     description: "A large hall for events",
     unit: "hall",
     location: "Mumbai",
+    rentAmountPaise: 500000,
+    securityDepositPaise: 1000000,
+    photos: [],
+    hasPreExistingDamage: false,
+    damagePhotos: [],
   };
 }
 
@@ -104,6 +109,11 @@ describe("ResourceService.createResource", () => {
       quantity: 1,
       status: "available" as const, // Zod default
       isActive: true,
+      rentAmountPaise: 500000,
+      securityDepositPaise: 1000000,
+      photos: [],
+      hasPreExistingDamage: false,
+      damagePhotos: [],
     };
 
     const createdResource = { id: "r-3", businessId: mockBusiness.id, ...inputWithoutStatus, createdAt: new Date(), updatedAt: new Date() };

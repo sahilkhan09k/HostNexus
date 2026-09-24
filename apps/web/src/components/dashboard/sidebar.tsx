@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -30,14 +30,11 @@ function usePendingBookings() {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    const token = AuthService.getToken();
-    if (!token) return;
+    if (!AuthService.getAccessToken()) return;
 
     const fetchPending = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/bookings?type=incoming`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings?type=incoming`);
         if (!res.ok) return;
         const data = await res.json();
         const bookings: { status: string }[] = data.data?.bookings ?? data.data ?? [];
@@ -61,14 +58,11 @@ function useUnreadMessages() {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    const token = AuthService.getToken();
-    if (!token) return;
+    if (!AuthService.getAccessToken()) return;
 
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/messages/unread`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/messages/unread`);
         if (!res.ok) return;
         const data = await res.json();
         setCount(data.data?.count ?? 0);

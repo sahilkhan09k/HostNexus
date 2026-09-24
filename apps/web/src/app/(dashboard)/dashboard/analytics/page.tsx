@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import {
@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -178,24 +179,17 @@ function StatusRow({ status, count }: StatusRowProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
+  const { fetchWithAuth } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
-      const token = localStorage.getItem("hostnexus_token");
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
-      const headers = { Authorization: `Bearer ${token}` };
-
       try {
         const [resourcesRes, incomingRes, outgoingRes] = await Promise.all([
-          fetch(`${API_BASE}/api/resources`, { headers }),
-          fetch(`${API_BASE}/api/bookings?type=incoming`, { headers }),
-          fetch(`${API_BASE}/api/bookings?type=outgoing`, { headers }),
+          fetchWithAuth(`${API_BASE}/api/resources`),
+          fetchWithAuth(`${API_BASE}/api/bookings?type=incoming`),
+          fetchWithAuth(`${API_BASE}/api/bookings?type=outgoing`),
         ]);
 
         const [resourcesJson, incomingJson, outgoingJson] = await Promise.all([

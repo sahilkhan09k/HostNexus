@@ -9,6 +9,21 @@ async function main() {
   const passwordHash = await bcrypt.hash("password123456", 10);
 
   // ============================================================
+  // ADMIN ACCOUNT
+  // ============================================================
+  const adminPasswordHash = await bcrypt.hash("Admin@HostNexus2026", 10);
+  await prisma.admin.upsert({
+    where: { email: "admin@hostnexus.in" },
+    update: {},
+    create: {
+      email: "admin@hostnexus.in",
+      passwordHash: adminPasswordHash,
+      name: "HostNexus Admin",
+    },
+  });
+  console.log("✅ Admin account seeded: admin@hostnexus.in / Admin@HostNexus2026");
+
+  // ============================================================
   // BUSINESS 1: Radisson Blu Pune (Hotel)
   // ============================================================
   const user1 = await prisma.user.upsert({
@@ -17,6 +32,11 @@ async function main() {
     create: {
       email: "demo@hostnexus.in",
       passwordHash,
+      ownerName: "Demo Owner",
+      phone: "9876543210",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-demo.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-demo.pdf",
     },
   });
 
@@ -110,6 +130,11 @@ async function main() {
     create: {
       email: "contact@royalcaterers.in",
       passwordHash,
+      ownerName: "Royal Owner",
+      phone: "9876543211",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-royal.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-royal.pdf",
     },
   });
 
@@ -183,6 +208,11 @@ async function main() {
     create: {
       email: "hello@eventpro.in",
       passwordHash,
+      ownerName: "EventPro Owner",
+      phone: "9876543212",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-eventpro.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-eventpro.pdf",
     },
   });
 
@@ -266,6 +296,11 @@ async function main() {
     create: {
       email: "bookings@tajbanquets.in",
       passwordHash,
+      ownerName: "Taj Owner",
+      phone: "9876543213",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-taj.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-taj.pdf",
     },
   });
 
@@ -339,6 +374,11 @@ async function main() {
     create: {
       email: "info@sunshineresorts.goa",
       passwordHash,
+      ownerName: "Sunshine Owner",
+      phone: "9876543214",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-sunshine.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-sunshine.pdf",
     },
   });
 
@@ -412,6 +452,11 @@ async function main() {
     create: {
       email: "parking@metrosolutions.in",
       passwordHash,
+      ownerName: "Metro Owner",
+      phone: "9876543215",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-metro.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-metro.pdf",
     },
   });
 
@@ -465,6 +510,11 @@ async function main() {
     create: {
       email: "decor@decordreams.in",
       passwordHash,
+      ownerName: "Decor Owner",
+      phone: "9876543216",
+      verificationStatus: "VERIFIED",
+      gstCertificateUrl: "https://example.com/gst-decor.pdf",
+      aadhaarUrl: "https://example.com/aadhaar-decor.pdf",
     },
   });
 
@@ -520,6 +570,30 @@ async function main() {
   }
 
   // ============================================================
+  // AVAILABILITY WINDOWS — give every seeded resource a 6-month window
+  // so the marketplace calendar shows real green days immediately
+  // ============================================================
+  const windowStart = new Date();
+  windowStart.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(windowStart);
+  windowEnd.setMonth(windowEnd.getMonth() + 6);
+
+  const allResources = await prisma.resource.findMany({ select: { id: true } });
+
+  // Clear any existing windows first (idempotent re-seed)
+  await prisma.availabilityWindow.deleteMany({});
+
+  await prisma.availabilityWindow.createMany({
+    data: allResources.map(r => ({
+      resourceId: r.id,
+      fromDate: windowStart,
+      toDate: windowEnd,
+      note: "Available — contact owner to confirm",
+    })),
+  });
+  console.log(`✅ Availability windows seeded for ${allResources.length} resources (today → +6 months)`);
+
+  // ============================================================
   // SUMMARY
   // ============================================================
   const totalBusinesses = 7;
@@ -531,7 +605,12 @@ async function main() {
   console.log(`✅ ${totalBusinesses} Businesses Created`);
   console.log(`✅ ${totalResources} Resources Listed`);
   console.log("");
-  console.log("📧 Demo Accounts:");
+  console.log("🔐 Admin Account:");
+  console.log("─────────────────────────────────────────");
+  console.log("   admin@hostnexus.in  /  Admin@HostNexus2026");
+  console.log("   → Portal: http://localhost:3000/admin");
+  console.log("");
+  console.log("📧 Demo Accounts (all VERIFIED, password: password123456):");
   console.log("─────────────────────────────────────────");
   console.log("1. demo@hostnexus.in           → Radisson Blu Pune");
   console.log("2. contact@royalcaterers.in    → Royal Caterers Mumbai");
@@ -540,8 +619,6 @@ async function main() {
   console.log("5. info@sunshineresorts.goa    → Sunshine Resorts Goa");
   console.log("6. parking@metrosolutions.in   → Metro Parking Solutions");
   console.log("7. decor@decordreams.in        → Decor Dreams Hyderabad");
-  console.log("");
-  console.log("🔑 Password for all: password123456");
   console.log("═══════════════════════════════════════════");
 }
 

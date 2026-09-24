@@ -28,7 +28,7 @@ type Toast = {
 
 export default function InventoryPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, fetchWithAuth } = useAuth();
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -56,18 +56,7 @@ export default function InventoryPage() {
   const fetchResources = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem("hostnexus_token");
-
-      if (!token) {
-        setError("Not authenticated");
-        return;
-      }
-
-      const response = await fetch(`${API_URL}/api/resources`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await fetchWithAuth(`${API_URL}/api/resources`);
 
       if (!response.ok) {
         throw new Error("Failed to fetch resources");
@@ -88,22 +77,13 @@ export default function InventoryPage() {
     );
     if (!confirmed) return;
 
-    const token = localStorage.getItem("hostnexus_token");
-    if (!token) {
-      addToast("error", "Not authenticated. Please log in again.");
-      return;
-    }
-
     // Optimistic update
     setDeletingId(resource.id);
     setResources((prev) => prev.filter((r) => r.id !== resource.id));
 
     try {
-      const response = await fetch(`${API_URL}/api/resources/${resource.id}`, {
+      const response = await fetchWithAuth(`${API_URL}/api/resources/${resource.id}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
       if (!response.ok) {
