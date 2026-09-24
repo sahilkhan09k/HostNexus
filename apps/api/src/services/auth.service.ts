@@ -25,6 +25,7 @@ interface TokenPair {
 
 interface AuthResponse {
   user: SafeUser;
+  token: string;
   accessToken: string;
   refreshToken: string;
 }
@@ -164,7 +165,7 @@ export class AuthService {
     }
 
     const tokens = this.generateTokenPair(user.id);
-    return { user: this.sanitizeUser(user), ...tokens };
+    return { user: this.sanitizeUser(user), token: tokens.accessToken, ...tokens };
   }
 
   static async getUserById(userId: string): Promise<SafeUser | null> {

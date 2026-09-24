@@ -96,7 +96,7 @@ export async function getResources(query?: Record<string, string>): Promise<Reso
 
 export async function getMarketplaceResources(query?: Record<string, string>): Promise<ResourceWithBusiness[]> {
   const params = query ? `?${new URLSearchParams(query).toString()}` : "";
-  const res = await fetch(`${API_BASE_URL}/api/resources/all${params}`);
+  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/resources/all${params}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || "Failed to fetch marketplace resources");
