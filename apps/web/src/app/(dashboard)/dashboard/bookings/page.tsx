@@ -574,6 +574,7 @@ export default function BookingsPage() {
             const rentINR = (b.rentAmountPaise || 0) / 100;
             const depositINR = (b.securityDepositPaise || 0) / 100;
             const totalINR = (b.totalAmountPaise || 0) / 100;
+            const transportINR = (b.transportFeePaise || 0) / 100;
 
             return (
               <div
@@ -617,6 +618,12 @@ export default function BookingsPage() {
                     </div>
                     <p className="text-[11px] text-stone-500">
                       Rent: ₹{rentINR.toLocaleString()} + Deposit: ₹{depositINR.toLocaleString()}
+                      {b.transportMode === "PROVIDER" && <> + Transport: ₹{transportINR.toLocaleString()}</>}
+                    </p>
+                    <p className="text-[11px] text-stone-500">
+                      {b.transportMode === "PROVIDER"
+                        ? `Transport: ${isOwner ? "you deliver" : "owner delivers"} · ${b.transportDistanceKm ?? 0} km × ₹${((b.transportRatePerKmPaise || 0) / 100).toLocaleString()}/km`
+                        : `Transport: ${isOwner ? "renter arranges own" : "you arrange your own"}`}
                     </p>
                   </div>
                 </div>
@@ -954,7 +961,14 @@ export default function BookingsPage() {
                     <div className="text-xs text-stone-600 flex flex-wrap gap-x-6 gap-y-1 pt-1 border-t border-stone-200/60">
                       <span>Owner: <strong>{selectedBooking.provider.name}</strong></span>
                       <span>Renter: <strong>{selectedBooking.seeker.name}</strong></span>
-                      <span>Total Escrow: <strong>₹{((selectedBooking.totalAmountPaise || 0) / 100).toLocaleString()}</strong> (Rent: ₹{((selectedBooking.rentAmountPaise || 0) / 100).toLocaleString()} + Deposit: ₹{((selectedBooking.securityDepositPaise || 0) / 100).toLocaleString()})</span>
+                      <span>Total Escrow: <strong>₹{((selectedBooking.totalAmountPaise || 0) / 100).toLocaleString()}</strong> (Rent: ₹{((selectedBooking.rentAmountPaise || 0) / 100).toLocaleString()} + Deposit: ₹{((selectedBooking.securityDepositPaise || 0) / 100).toLocaleString()}{selectedBooking.transportMode === "PROVIDER" && <> + Transport: ₹{((selectedBooking.transportFeePaise || 0) / 100).toLocaleString()}</>})</span>
+                      <span>
+                        Transport: <strong>
+                          {selectedBooking.transportMode === "PROVIDER"
+                            ? `Owner delivers (${selectedBooking.transportDistanceKm ?? 0} km × ₹${((selectedBooking.transportRatePerKmPaise || 0) / 100).toLocaleString()}/km)`
+                            : "Renter arranges own"}
+                        </strong>
+                      </span>
                     </div>
                   </div>
 

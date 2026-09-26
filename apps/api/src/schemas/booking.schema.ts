@@ -7,7 +7,13 @@ export const createBookingRequestSchema = z.object({
   endDate:         z.string().datetime("End date must be a valid ISO datetime"),
   specialRequests: z.string().optional(),
   proposedPrice:   z.number().positive().optional(),
-});
+  // SELF = renter arranges transport; PROVIDER = owner delivers at their per-km rate
+  transportMode:       z.enum(["SELF", "PROVIDER"]).optional(), // omitted = SELF
+  transportDistanceKm: z.number().positive("Distance must be greater than 0").max(5000, "Distance cannot exceed 5,000 km").optional(),
+}).refine(
+  (data) => data.transportMode !== "PROVIDER" || data.transportDistanceKm !== undefined,
+  { message: "Distance (km) is required when choosing the owner's transport", path: ["transportDistanceKm"] }
+);
 
 // FIX #16: Removed dead "completed" variant — completion is handled by ownerAcceptReturn
 export const updateBookingStatusSchema = z.object({

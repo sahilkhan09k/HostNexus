@@ -8,7 +8,7 @@ import {
   ArrowLeft, CalendarDays, CheckCircle2, MapPin, ShieldCheck,
   Star, AlertTriangle, Loader2, ChevronLeft, ChevronRight,
   Building2, TrendingUp, TrendingDown, Award, Users, Package,
-  ExternalLink, DollarSign,
+  ExternalLink, DollarSign, Truck,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,7 @@ interface ResourceDetail {
   rentAmountPaise: number; securityDepositPaise: number;
   photos: string[]; hasPreExistingDamage: boolean;
   damageDescription: string | null; damagePhotos: string[];
+  transportAvailable: boolean; transportRatePerKmPaise: number;
   availabilityWindows: { id: string; fromDate: string; toDate: string; note: string | null }[];
   business: { id: string; name: string; ownerId: string; city: string | null; state: string | null; businessType: string | null; };
 }
@@ -221,6 +222,9 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const [start, setStart] = useState("");
   const [end, setEnd]     = useState("");
   const [notes, setNotes] = useState("");
+  // Transport: owner's transport (per km) or renter arranges their own
+  const [transportMode, setTransportMode] = useState<"SELF" | "PROVIDER">("SELF");
+  const [distanceKm, setDistanceKm]       = useState(0);
 
   // Negotiate-only
   const [offerPerDay, setOfferPerDay] = useState<number>(
@@ -240,16 +244,24 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const listedPerDay    = resource.rentAmountPaise / 100;
   const depositINR      = resource.securityDepositPaise / 100;
   const totalRent       = totalDays ? listedPerDay * totalDays * qty : null;
-  const totalAmount     = totalRent !== null ? totalRent + depositINR : null;
+
+  const transportOffered    = resource.transportAvailable && resource.transportRatePerKmPaise > 0;
+  const usingOwnerTransport = transportOffered && transportMode === "PROVIDER";
+  const transportRateINR    = resource.transportRatePerKmPaise / 100;
+  // Same rounding as the API: fee in paise = round(rate paise × km)
+  const transportFeeINR     = usingOwnerTransport ? Math.round(resource.transportRatePerKmPaise * distanceKm) / 100 : 0;
+
+  const totalAmount     = totalRent !== null ? totalRent + depositINR + transportFeeINR : null;
 
   const offerTotalRent  = totalDays ? offerPerDay * totalDays * qty : null;
-  const offerTotal      = offerTotalRent !== null ? offerTotalRent + depositINR : null;
+  const offerTotal      = offerTotalRent !== null ? offerTotalRent + depositINR + transportFeeINR : null;
   const savingINR       = offerTotalRent !== null && totalRent !== null ? totalRent - offerTotalRent : null;
   const savingPct       = savingINR !== null && totalRent ? Math.round((savingINR / totalRent) * 100) : 0;
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!start || !end) { setError("Please select start and end dates"); return; }
+    if (usingOwnerTransport && !(distanceKm > 0)) { setError("Enter the distance in km to use the owner's transport"); return; }
     setSubmitting(true); setError("");
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/bookings`, {
@@ -260,6 +272,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           startDate: new Date(start + "T00:00:00").toISOString(),
           endDate:   new Date(end   + "T00:00:00").toISOString(),
           specialRequests: notes || undefined,
+          transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
+          transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
         }),
       });
       if (!res.ok) {
@@ -276,6 +290,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const handleNegotiate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!start || !end) { setError("Please select start and end dates"); return; }
+    if (usingOwnerTransport && !(distanceKm > 0)) { setError("Enter the distance in km to use the owner's transport"); return; }
     if (offerPerDay <= 0) { setError("Please enter a valid offer amount"); return; }
     setSubmitting(true); setError("");
     try {
@@ -288,6 +303,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           startDate: new Date(start + "T00:00:00").toISOString(),
           endDate:   new Date(end   + "T00:00:00").toISOString(),
           specialRequests: notes || undefined,
+          transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
+          transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
         }),
       });
       if (!bookRes.ok) {
@@ -342,6 +359,58 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
       </div>
     </>
   );
+
+  // ── Transport choice ──
+  // Called as a function (not <Component/>) so the km input keeps focus while typing.
+  const renderTransport = () => {
+    if (!transportOffered) {
+      return (
+        <div className="flex items-start gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[11px] text-stone-600">
+          <Truck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+          <span>
+            <span className="font-semibold text-stone-800">Owner does not provide transport.</span>{" "}
+            You will arrange pickup{resource.location ? ` from ${resource.location}` : ""} and return yourself.
+          </span>
+        </div>
+      );
+    }
+    const option = (mode: "PROVIDER" | "SELF", title: string, subtitle: string) => (
+      <button type="button" onClick={() => setTransportMode(mode)} aria-pressed={transportMode === mode}
+        className={cn(
+          "flex-1 rounded-xl border p-2.5 text-left transition-all",
+          transportMode === mode
+            ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20"
+            : "border-stone-200 bg-white hover:bg-stone-50"
+        )}>
+        <p className="text-xs font-bold text-stone-900">{title}</p>
+        <p className="text-[10px] text-stone-500">{subtitle}</p>
+      </button>
+    );
+    return (
+      <div className="space-y-2">
+        <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <Truck className="h-3.5 w-3.5" /> Transport
+        </label>
+        <div className="flex gap-2">
+          {option("PROVIDER", "Owner's transport", `₹${transportRateINR.toLocaleString()} / km`)}
+          {option("SELF", "Arrange my own", "No transport charge")}
+        </div>
+        {transportMode === "PROVIDER" && (
+          <div>
+            <input type="number" min="0.1" step="0.1" max="5000" value={distanceKm || ""}
+              onChange={e => setDistanceKm(parseFloat(e.target.value) || 0)}
+              placeholder="Distance in km, e.g. 12"
+              aria-label="Transport distance in km"
+              className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all" />
+            <p className="mt-1 text-[10px] text-stone-400">
+              From {resource.location || "the owner's location"} to your venue
+              {distanceKm > 0 && <> · fee <span className="font-semibold text-stone-700">₹{transportFeeINR.toLocaleString()}</span></>}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (success === "booked") {
     return (
@@ -415,15 +484,23 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
               <span className="text-stone-500">Security Deposit</span>
               <span className="font-bold text-emerald-700">₹{depositINR.toLocaleString()}</span>
             </div>
+            {usingOwnerTransport && (
+              <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
+                <span className="text-stone-500">Transport ({distanceKm || 0} km × ₹{transportRateINR.toLocaleString()})</span>
+                <span className="font-bold text-stone-800">₹{transportFeeINR.toLocaleString()}</span>
+              </div>
+            )}
             {totalAmount !== null && (
               <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
-                <span className="font-semibold text-stone-700">Total ({totalDays}d rent + deposit)</span>
+                <span className="font-semibold text-stone-700">Total ({totalDays}d rent + deposit{usingOwnerTransport ? " + transport" : ""})</span>
                 <span className="font-black text-stone-900">₹{totalAmount.toLocaleString()}</span>
               </div>
             )}
           </div>
 
           <DateQtyInputs />
+
+          {renderTransport()}
 
           {/* Notes */}
           <div>
@@ -480,6 +557,12 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
                   <span>+ Deposit:</span>
                   <span>₹{depositINR.toLocaleString()}</span>
                 </div>
+                {usingOwnerTransport && (
+                  <div className="flex justify-between text-stone-600">
+                    <span>+ Transport:</span>
+                    <span>₹{transportFeeINR.toLocaleString()}</span>
+                  </div>
+                )}
                 <div className="flex justify-between font-bold text-stone-900 border-t border-stone-100 pt-1.5">
                   <span>Total Escrow:</span>
                   <span className="text-amber-700">₹{(offerTotal ?? 0).toLocaleString()}</span>
@@ -497,6 +580,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           </div>
 
           <DateQtyInputs />
+
+          {renderTransport()}
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Message to Owner (optional)</label>

@@ -35,6 +35,9 @@ export default function RootLayout({ children }: LayoutProps) {
     <html
       lang="en"
       className={`${interTight.variable} ${geistMono.variable} h-full`}
+      // Browser extensions (dark mode, Grammarly, ...) add classes/attributes to
+      // <html> before hydration; only this element's attributes are exempt.
+      suppressHydrationWarning
     >
       <body className="min-h-full bg-[#FAFAFA] text-[#131519] antialiased">
         <AuthProvider>

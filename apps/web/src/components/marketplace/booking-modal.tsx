@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   X, Calendar, ShieldCheck, AlertTriangle, Info, Loader2,
   CheckCircle2, Lock, ArrowRight, MessageSquare, DollarSign,
-  TrendingDown, Handshake,
+  TrendingDown, Handshake, Truck,
 } from "lucide-react";
 import { createBookingRequest, makeNegotiationOffer } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,8 @@ interface BookingModalProps {
     hasPreExistingDamage?: boolean;
     damageDescription?: string | null;
     damagePhotos?: string[];
+    transportAvailable?: boolean;
+    transportRatePerKmPaise?: number;
     business?: { id: string; name: string };
   };
 }
@@ -48,6 +50,10 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   const [specialRequests, setSpecialRequests] = useState("");
   const [acknowledgedInspection, setAcknowledgedInspection] = useState(false);
 
+  // Transport: renter picks the owner's transport (charged per km) or arranges their own
+  const [transportMode, setTransportMode] = useState<"SELF" | "PROVIDER">("SELF");
+  const [distanceKm, setDistanceKm]       = useState<number>(0);
+
   // Negotiate-tab fields
   const [offerPerDayINR, setOfferPerDayINR] = useState<number>(
     Math.round((resource.rentAmountPaise ?? 0) / 100 * 0.9) || 0
@@ -68,10 +74,18 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   const listedDailyINR  = (resource.rentAmountPaise ?? 0) / 100;
   const depositINR      = (resource.securityDepositPaise ?? 0) / 100;
   const totalRentINR    = listedDailyINR * diffDays * quantity;
-  const totalEscrowINR  = totalRentINR + depositINR;
+
+  const transportOffered    = Boolean(resource.transportAvailable) && (resource.transportRatePerKmPaise ?? 0) > 0;
+  const usingOwnerTransport = transportOffered && transportMode === "PROVIDER";
+  const transportRateINR    = (resource.transportRatePerKmPaise ?? 0) / 100;
+  // Same rounding as the API: fee in paise = round(rate paise × km)
+  const transportFeeINR     = usingOwnerTransport
+    ? Math.round((resource.transportRatePerKmPaise ?? 0) * distanceKm) / 100
+    : 0;
+  const totalEscrowINR  = totalRentINR + depositINR + transportFeeINR;
 
   const offerTotalRentINR   = offerPerDayINR * diffDays * quantity;
-  const offerTotalEscrowINR = offerTotalRentINR + depositINR;
+  const offerTotalEscrowINR = offerTotalRentINR + depositINR + transportFeeINR;
   const savingINR           = totalRentINR - offerTotalRentINR;
   const savingPct           = listedDailyINR > 0
     ? Math.round((savingINR / totalRentINR) * 100)
@@ -84,6 +98,10 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       setErrorMessage("Please acknowledge the 1-hour handover inspection policy.");
       return;
     }
+    if (usingOwnerTransport && !(distanceKm > 0)) {
+      setErrorMessage("Enter the distance in km to use the owner's transport.");
+      return;
+    }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
@@ -93,6 +111,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
         startDate:       new Date(startDate).toISOString(),
         endDate:         new Date(endDate).toISOString(),
         specialRequests: specialRequests.trim() || undefined,
+        transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
+        transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
       });
       setSuccessState("booked");
       setTimeout(() => router.push("/dashboard/bookings"), 1500);
@@ -114,6 +134,10 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       setErrorMessage("Please enter a valid offer amount.");
       return;
     }
+    if (usingOwnerTransport && !(distanceKm > 0)) {
+      setErrorMessage("Enter the distance in km to use the owner's transport.");
+      return;
+    }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
@@ -124,6 +148,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
         startDate:       new Date(startDate).toISOString(),
         endDate:         new Date(endDate).toISOString(),
         specialRequests: specialRequests.trim() || undefined,
+        transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
+        transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
       });
 
       // 2. Immediately open a negotiation with the proposed daily rate
@@ -165,6 +191,81 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       </div>
     </div>
   );
+
+  // ── Transport choice ───────────────────────────────────────────
+  // Called as a function (not <Component/>) so the km input keeps focus while typing.
+  const renderTransport = () => {
+    if (!transportOffered) {
+      return (
+        <div className="rounded-xl border border-stone-200 bg-stone-50/60 p-3 flex items-start gap-2.5 text-xs text-stone-600">
+          <Truck className="w-4 h-4 text-stone-400 shrink-0 mt-0.5" />
+          <span>
+            <span className="font-semibold text-stone-800">Owner does not provide transport.</span>{" "}
+            You will arrange pickup{resource.location ? ` from ${resource.location}` : ""} and return yourself.
+          </span>
+        </div>
+      );
+    }
+
+    const option = (mode: "PROVIDER" | "SELF", title: string, subtitle: string) => (
+      <button
+        type="button"
+        onClick={() => setTransportMode(mode)}
+        aria-pressed={transportMode === mode}
+        className={cn(
+          "flex-1 rounded-xl border p-3 text-left transition-colors",
+          transportMode === mode
+            ? "border-emerald-500 bg-emerald-50/70 ring-2 ring-emerald-500/20"
+            : "border-stone-200 bg-white hover:bg-stone-50"
+        )}
+      >
+        <p className="text-xs font-bold text-stone-900">{title}</p>
+        <p className="text-[11px] text-stone-500 mt-0.5">{subtitle}</p>
+      </button>
+    );
+
+    return (
+      <div className="rounded-xl border border-stone-200 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Truck className="w-4 h-4 text-emerald-600" />
+          <p className="text-xs font-bold uppercase tracking-wide text-stone-700">Transport</p>
+          <span className="ml-auto text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+            Owner provides transport
+          </span>
+        </div>
+        <div className="flex gap-3">
+          {option("PROVIDER", "Use owner's transport", `₹${transportRateINR.toLocaleString()} per km`)}
+          {option("SELF", "Arrange my own", "No transport charge")}
+        </div>
+        {transportMode === "PROVIDER" && (
+          <div className="grid grid-cols-2 gap-3 items-start">
+            <div>
+              <label htmlFor="transportDistanceKm" className="block text-xs font-semibold uppercase text-stone-600 mb-1">
+                Distance (km) *
+              </label>
+              <input
+                id="transportDistanceKm"
+                type="number" min="0.1" step="0.1" max="5000"
+                value={distanceKm || ""}
+                onChange={e => setDistanceKm(parseFloat(e.target.value) || 0)}
+                placeholder="e.g. 12"
+                className="w-full rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500"
+              />
+              <p className="mt-1 text-[10px] text-stone-400">
+                From {resource.location || "the owner's location"} to your venue
+              </p>
+            </div>
+            <div className="rounded-xl bg-stone-50 border border-stone-200 px-3 py-2 text-xs">
+              <p className="text-stone-500">Transport fee</p>
+              <p className="font-bold text-stone-900 text-sm">
+                {distanceKm > 0 ? `₹${transportFeeINR.toLocaleString()}` : "—"}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ── Inspection acknowledgement ─────────────────────────────────
   const InspectionAck = () => (
@@ -330,6 +431,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                 <form onSubmit={handleBook} className="space-y-5">
                   <DateQuantityRow />
 
+                  {renderTransport()}
+
                   {/* Escrow summary */}
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2 text-xs">
                     <div className="flex justify-between text-stone-600">
@@ -340,6 +443,12 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                       <span>Refundable Deposit (Escrow):</span>
                       <span>₹{depositINR.toLocaleString()}</span>
                     </div>
+                    {usingOwnerTransport && (
+                      <div className="flex justify-between text-stone-600">
+                        <span>Transport ({distanceKm || 0} km × ₹{transportRateINR.toLocaleString()}):</span>
+                        <span className="font-semibold text-stone-800">₹{transportFeeINR.toLocaleString()}</span>
+                      </div>
+                    )}
                     <div className="border-t border-stone-200 pt-2 flex justify-between text-sm font-bold text-stone-900">
                       <span>Total Escrow:</span>
                       <span className="text-emerald-700">₹{totalEscrowINR.toLocaleString()}</span>
@@ -374,6 +483,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
               {tab === "negotiate" && (
                 <form onSubmit={handleNegotiate} className="space-y-5">
                   <DateQuantityRow />
+
+                  {renderTransport()}
 
                   {/* Offer input */}
                   <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-4">
@@ -411,6 +522,12 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                           <span>+ Deposit:</span>
                           <span>₹{depositINR.toLocaleString()}</span>
                         </div>
+                        {usingOwnerTransport && (
+                          <div className="flex justify-between text-stone-600">
+                            <span>+ Transport:</span>
+                            <span>₹{transportFeeINR.toLocaleString()}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between border-t border-stone-100 pt-1 text-sm font-bold text-stone-900">
                           <span>Total Escrow:</span>
                           <span className="text-amber-700">₹{offerTotalEscrowINR.toLocaleString()}</span>

@@ -80,7 +80,23 @@ export const resourceFormSchema = z
     hasPreExistingDamage: z.boolean().default(false),
     damageDescription: z.string().optional(),
     damagePhotos: z.array(z.string()).default([]),
+
+    // Owner-provided transport (₹ per km, converted to paise on submission)
+    transportAvailable: z.boolean().default(false),
+    transportRatePerKm: z
+      .number({
+        invalid_type_error: "Transport rate must be a number",
+      })
+      .min(0, "Transport rate cannot be negative")
+      .default(0),
   })
+  .refine(
+    (data) => !data.transportAvailable || data.transportRatePerKm > 0,
+    {
+      message: "Enter how much you charge per km for transport",
+      path: ["transportRatePerKm"],
+    }
+  )
   .refine(
     (data) => {
       if (data.hasPreExistingDamage) {

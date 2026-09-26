@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/auth-context";
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
 const TRUST_POINTS = [
-  "Access 35+ live hospitality resources",
+  "Access live hospitality resources",
   "AI concierge available 24/7",
   "Escrow-protected transactions",
 ];
@@ -91,7 +91,7 @@ export default function LoginPage() {
         </div>
 
         <p className="relative z-10 text-xs text-white/50">
-          Trusted by 200+ businesses across Pune &amp; Mumbai
+          KYC-verified businesses across Pune &amp; Mumbai
         </p>
       </div>
 

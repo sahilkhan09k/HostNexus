@@ -174,7 +174,7 @@ export class NegotiationService {
       // Recalculate totals based on agreed daily rate
       const totalDays = booking.totalDays ?? 1;
       const newRentPaise  = latestOffer.offeredAmountPaise * totalDays;
-      const newTotalPaise = newRentPaise + booking.securityDepositPaise;
+      const newTotalPaise = newRentPaise + booking.securityDepositPaise + booking.transportFeePaise;
 
       // Update booking price + accept
       const updated = await tx.bookingRequest.update({

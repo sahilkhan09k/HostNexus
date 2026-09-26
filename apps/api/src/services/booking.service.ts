@@ -91,7 +91,7 @@ export class BookingService {
           data: {
             bookingId: booking.id,
             type: "RENT_PAYOUT",
-            amountPaise: booking.rentAmountPaise,
+            amountPaise: booking.rentAmountPaise + booking.transportFeePaise, // transport fee is paid out with rent
             status: "COMPLETED",
             providerReference: `AUTO_RENT_${booking.id}`,   // stable, booking-id-scoped (#18)
           },
@@ -226,10 +226,21 @@ export class BookingService {
       );
     }
 
+    // Transport: renter may only pick the owner's transport if the listing offers it.
+    const useProviderTransport = input.transportMode === "PROVIDER";
+    if (useProviderTransport && !resource.transportAvailable) {
+      throw new Error("The owner does not provide transport for this resource");
+    }
+    const transportDistanceKm     = useProviderTransport ? input.transportDistanceKm! : null;
+    const transportRatePerKmPaise = useProviderTransport ? resource.transportRatePerKmPaise : 0;
+    const transportFeePaise       = useProviderTransport
+      ? Math.round(transportRatePerKmPaise * transportDistanceKm!)
+      : 0;
+
     // Financial calculation in paise
     const rentAmountPaise      = resource.rentAmountPaise * totalDays;
     const securityDepositPaise = resource.securityDepositPaise;
-    const totalAmountPaise     = rentAmountPaise + securityDepositPaise;
+    const totalAmountPaise     = rentAmountPaise + securityDepositPaise + transportFeePaise;
 
     const conditionSnapshot = {
       resourceName: resource.name,
@@ -267,6 +278,10 @@ export class BookingService {
           rentAmountPaise,
           securityDepositPaise,
           totalAmountPaise,
+          transportMode: useProviderTransport ? "PROVIDER" : "SELF",
+          transportDistanceKm,
+          transportRatePerKmPaise,
+          transportFeePaise,
           proposedPrice: input.proposedPrice ?? (totalAmountPaise / 100),
           conditionSnapshot:        conditionSnapshot as any,
           listingPhotosSnapshot,
@@ -287,7 +302,11 @@ export class BookingService {
       seekerBusiness.id,
       "RENTER",
       "Booking Requested",
-      `Requested by ${seekerBusiness.name} for ${totalDays} day(s). Rent: ₹${(rentAmountPaise / 100).toLocaleString()}, Deposit: ₹${(securityDepositPaise / 100).toLocaleString()}`
+      `Requested by ${seekerBusiness.name} for ${totalDays} day(s). Rent: ₹${(rentAmountPaise / 100).toLocaleString()}, Deposit: ₹${(securityDepositPaise / 100).toLocaleString()}. ${
+        useProviderTransport
+          ? `Owner transport: ${transportDistanceKm} km × ₹${(transportRatePerKmPaise / 100).toLocaleString()}/km = ₹${(transportFeePaise / 100).toLocaleString()}.`
+          : "Renter arranges own transport."
+      }`
     );
 
     return bookingRequest;
@@ -562,6 +581,7 @@ export class BookingService {
       totalAmountPaise: booking.totalAmountPaise,
       rentAmountPaise:  booking.rentAmountPaise,
       securityDepositPaise: booking.securityDepositPaise,
+      transportFeePaise: booking.transportFeePaise,
     };
   }
 
@@ -644,7 +664,7 @@ export class BookingService {
       business.id,
       "RENTER",
       "Escrow Funded via Razorpay",
-      `₹${(booking.totalAmountPaise / 100).toLocaleString()} (Rent: ₹${(booking.rentAmountPaise / 100).toLocaleString()} + Deposit: ₹${(booking.securityDepositPaise / 100).toLocaleString()}) safely held in platform escrow. Razorpay Payment ID: ${razorpayPaymentId}`,
+      `₹${(booking.totalAmountPaise / 100).toLocaleString()} (Rent: ₹${(booking.rentAmountPaise / 100).toLocaleString()} + Deposit: ₹${(booking.securityDepositPaise / 100).toLocaleString()}${booking.transportFeePaise > 0 ? ` + Transport: ₹${(booking.transportFeePaise / 100).toLocaleString()}` : ""}) safely held in platform escrow. Razorpay Payment ID: ${razorpayPaymentId}`,
       { razorpayOrderId, razorpayPaymentId }
     );
 
@@ -775,7 +795,7 @@ export class BookingService {
           data: {
             bookingId,
             type: "RENT_PAYOUT",
-            amountPaise: booking.rentAmountPaise,
+            amountPaise: booking.rentAmountPaise + booking.transportFeePaise, // transport fee is paid out with rent
             status: "COMPLETED",
             providerReference: `RENT_RELEASE_${bookingId}`,   // stable (#18)
           },
@@ -787,7 +807,7 @@ export class BookingService {
       await this.recordTimelineEvent(
         bookingId, "RECEIVING_ACCEPTED", business.id, "RENTER",
         "Resource Accepted by Renter",
-        `Renter confirmed physical receipt and acceptable condition. Rent (₹${(booking.rentAmountPaise / 100).toLocaleString()}) disbursed to owner; Security Deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) remains safely held in escrow.`
+        `Renter confirmed physical receipt and acceptable condition. Rent (₹${(booking.rentAmountPaise / 100).toLocaleString()})${booking.transportFeePaise > 0 ? ` and transport fee (₹${(booking.transportFeePaise / 100).toLocaleString()})` : ""} disbursed to owner; Security Deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) remains safely held in escrow.`
       );
 
       return updated;

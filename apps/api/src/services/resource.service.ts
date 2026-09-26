@@ -34,6 +34,8 @@ export class ResourceService {
         hasPreExistingDamage: input.hasPreExistingDamage || false,
         damageDescription: input.damageDescription || null,
         damagePhotos: input.damagePhotos || [],
+        transportAvailable: input.transportAvailable ?? false,
+        transportRatePerKmPaise: input.transportAvailable ? input.transportRatePerKmPaise ?? 0 : 0,
       },
     });
 

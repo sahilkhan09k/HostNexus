@@ -58,6 +58,8 @@ interface ResourceDetail {
   hasPreExistingDamage: boolean;
   damageDescription: string | null;
   damagePhotos: string[];
+  transportAvailable: boolean;
+  transportRatePerKmPaise: number;
   availabilityWindows: { id: string; fromDate: string; toDate: string; note: string | null }[];
   business: {
     id: string; name: string; ownerId: string;
@@ -586,6 +588,16 @@ export default function ResourceDetailPage() {
                       ₹{(resource.securityDepositPaise / 100).toLocaleString()}
                     </span>
                   </div>
+                  <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
+                    <span className="text-stone-500">Transport</span>
+                    {resource.transportAvailable ? (
+                      <span className="font-bold text-stone-800">
+                        Owner provides · ₹{(resource.transportRatePerKmPaise / 100).toLocaleString()}/km
+                      </span>
+                    ) : (
+                      <span className="font-medium text-stone-500">Not provided · arrange your own</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Escrow note */}
@@ -661,6 +673,8 @@ export default function ResourceDetailPage() {
           hasPreExistingDamage: resource.hasPreExistingDamage,
           damageDescription:    resource.damageDescription,
           damagePhotos:         resource.damagePhotos,
+          transportAvailable:      resource.transportAvailable,
+          transportRatePerKmPaise: resource.transportRatePerKmPaise,
           business: { id: resource.business.id, name: resource.business.name },
         }}
       />

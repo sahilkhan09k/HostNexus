@@ -98,6 +98,10 @@ model Resource {
   damageDescription     String?
   damagePhotos          String[] @default([])
 
+  // Owner-provided transport. Renter may opt in at booking; fee = rate × distance.
+  transportAvailable      Boolean @default(false)
+  transportRatePerKmPaise Int     @default(0)
+
   bookingRequests    BookingRequest[]
   availabilityWindows AvailabilityWindow[]
   createdAt    DateTime @default(now())
@@ -152,6 +156,13 @@ model BookingRequest {
   rentAmountPaise       Int   @default(0)
   securityDepositPaise  Int   @default(0)
   totalAmountPaise      Int   @default(0)
+
+  // Transport choice. SELF = renter arranges their own; PROVIDER = owner delivers.
+  // Fee is released to the owner together with rent after handover.
+  transportMode           String @default("SELF") // SELF | PROVIDER
+  transportDistanceKm     Float?
+  transportRatePerKmPaise Int    @default(0)
+  transportFeePaise       Int    @default(0)
 
   // Legacy prices
   proposedPrice   Float?

@@ -148,6 +148,53 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
     });
   });
 
+  describe("transport", () => {
+    const withTransport = { ...mockResource, transportAvailable: true, transportRatePerKmPaise: 2500 }; // ₹25/km
+    const now   = Date.now();
+    const start = new Date(now + 86400000).toISOString();
+    const end   = new Date(now + 86400000 * 3).toISOString(); // exactly 2 days
+
+    beforeEach(() => {
+      (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(renterBusiness);
+      (prisma.bookingRequest.create as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ id: "b", ...data }));
+    });
+
+    it("adds the owner's per-km transport fee to the total when the renter opts in", async () => {
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(withTransport);
+
+      const b = await BookingService.createBookingRequest(renterUserId, {
+        resourceId: withTransport.id, quantity: 1, startDate: start, endDate: end,
+        transportMode: "PROVIDER", transportDistanceKm: 12.5,
+      });
+      expect(b.transportMode).toBe("PROVIDER");
+      expect(b.transportRatePerKmPaise).toBe(2500);
+      expect(b.transportFeePaise).toBe(31250); // 12.5 km × ₹25 = ₹312.50
+      expect(b.totalAmountPaise).toBe(400000 + 500000 + 31250);
+    });
+
+    it("charges nothing for transport when the renter arranges their own", async () => {
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(withTransport);
+
+      const b = await BookingService.createBookingRequest(renterUserId, {
+        resourceId: withTransport.id, quantity: 1, startDate: start, endDate: end, transportMode: "SELF",
+      });
+      expect(b.transportMode).toBe("SELF");
+      expect(b.transportFeePaise).toBe(0);
+      expect(b.totalAmountPaise).toBe(900000);
+    });
+
+    it("rejects owner transport when the listing does not offer it", async () => {
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ ...mockResource, transportAvailable: false });
+
+      await expect(
+        BookingService.createBookingRequest(renterUserId, {
+          resourceId: mockResource.id, quantity: 1, startDate: start, endDate: end,
+          transportMode: "PROVIDER", transportDistanceKm: 10,
+        })
+      ).rejects.toThrow(/does not provide transport/);
+    });
+  });
+
   it("creates booking with commercial snapshot and exact paise calculations", async () => {
     (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(renterBusiness);
     (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockResource);
@@ -209,6 +256,7 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       bookingStatus: "HANDOVER_INSPECTION",
       financialStatus: "FUNDS_HELD",
       rentAmountPaise: 400000,
+      transportFeePaise: 0,
       securityDepositPaise: 500000,
       quantity: 1,
     };

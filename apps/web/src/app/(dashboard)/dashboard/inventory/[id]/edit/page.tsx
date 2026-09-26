@@ -12,6 +12,7 @@ import {
   Info,
   Loader2,
   ShieldCheck,
+  Truck,
   X,
   AlertTriangle,
 } from "lucide-react";
@@ -57,6 +58,8 @@ export default function EditResourcePage() {
   const [hasPreExistingDamage, setHasPreExistingDamage] = useState(false);
   const [damageDescription, setDamageDescription] = useState("");
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
+  const [transportAvailable, setTransportAvailable] = useState(false);
+  const [transportRatePerKm, setTransportRatePerKm] = useState(0);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -94,6 +97,8 @@ export default function EditResourcePage() {
         setHasPreExistingDamage(Boolean(found.hasPreExistingDamage));
         setDamageDescription(found.damageDescription || "");
         setDamagePhotos(found.damagePhotos || []);
+        setTransportAvailable(Boolean(found.transportAvailable));
+        setTransportRatePerKm((found.transportRatePerKmPaise || 0) / 100);
       } catch (err: any) {
         setFetchError(err.message || "Failed to load resource");
       } finally {
@@ -112,6 +117,10 @@ export default function EditResourcePage() {
     }
     if (hasPreExistingDamage && (!damageDescription.trim() || damagePhotos.length === 0)) {
       setSubmitError("Please provide a description and at least one photo for pre-existing damage.");
+      return;
+    }
+    if (transportAvailable && !(transportRatePerKm > 0)) {
+      setSubmitError("Enter how much you charge per km for transport.");
       return;
     }
 
@@ -134,6 +143,8 @@ export default function EditResourcePage() {
         hasPreExistingDamage,
         damageDescription: hasPreExistingDamage ? damageDescription : undefined,
         damagePhotos: hasPreExistingDamage ? damagePhotos : [],
+        transportAvailable,
+        transportRatePerKmPaise: transportAvailable ? Math.round(Number(transportRatePerKm) * 100) : 0,
       };
 
       const res = await AuthService.fetchWithAuth(`${API_URL}/api/resources/${id}`, {
@@ -354,6 +365,57 @@ export default function EditResourcePage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Transport offering */}
+          <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-2.5">
+                <Truck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-stone-900">I can provide transport</p>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Renters can choose your transport (charged per km) or arrange their own.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={transportAvailable}
+                aria-label="I can provide transport"
+                onClick={() => setTransportAvailable(!transportAvailable)}
+                className={cn(
+                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2",
+                  transportAvailable ? "bg-emerald-600" : "bg-stone-300"
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                    transportAvailable ? "translate-x-5" : "translate-x-0"
+                  )}
+                />
+              </button>
+            </div>
+
+            {transportAvailable && (
+              <div className="sm:w-1/2">
+                <label className={LABEL_BASE}>Transport Charge per km (₹ INR) *</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    placeholder="e.g. 25"
+                    value={transportRatePerKm || ""}
+                    onChange={(e) => setTransportRatePerKm(parseFloat(e.target.value) || 0)}
+                    className={cn(INPUT_BASE, "pl-8 bg-white")}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 flex items-start gap-3 text-xs text-amber-900">

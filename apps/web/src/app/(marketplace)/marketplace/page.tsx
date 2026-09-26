@@ -35,6 +35,8 @@ interface ApiResource {
   hasPreExistingDamage?: boolean;
   damageDescription?: string | null;
   damagePhotos?: string[];
+  transportAvailable?: boolean;
+  transportRatePerKmPaise?: number;
   business: {
     id: string;
     name: string;
@@ -87,6 +89,8 @@ function mapApiResource(r: ApiResource): ResourceCardData {
     hasPreExistingDamage: r.hasPreExistingDamage,
     damageDescription: r.damageDescription,
     damagePhotos: r.damagePhotos,
+    transportAvailable: r.transportAvailable,
+    transportRatePerKmPaise: r.transportRatePerKmPaise,
   };
 }
 
@@ -468,6 +472,8 @@ function MarketplaceContent() {
             hasPreExistingDamage: selectedResource.hasPreExistingDamage,
             damageDescription:    selectedResource.damageDescription,
             damagePhotos:         selectedResource.damagePhotos,
+            transportAvailable:      selectedResource.transportAvailable,
+            transportRatePerKmPaise: selectedResource.transportRatePerKmPaise,
             business: { id: selectedResource.businessId, name: selectedResource.business },
           }}
         />
