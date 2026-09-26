@@ -55,10 +55,10 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)] lg:grid-cols-2">
+    <div className="flex w-full max-w-6xl overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)]">
 
       {/* ── Left panel — branding ── */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-stone-950 p-10 lg:flex">
+      <div className="relative hidden w-[46%] shrink-0 flex-col justify-between overflow-hidden bg-stone-950 p-10 lg:flex xl:p-12">
         {/* Background pattern */}
         <div
           className="absolute inset-0 opacity-10"
@@ -100,7 +100,7 @@ export default function LoginPage() {
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.45, ease: EASE }}
-        className="flex flex-col justify-center p-8 md:p-10"
+        className="flex min-w-0 flex-1 flex-col justify-center p-8 md:p-12"
       >
         <div className="mb-8">
           <h1 className="font-display text-3xl font-semibold text-stone-900">Sign in to your account</h1>

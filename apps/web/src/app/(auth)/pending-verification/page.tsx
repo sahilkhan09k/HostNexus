@@ -39,7 +39,7 @@ const STEPS = [
 
 export default function PendingVerificationPage() {
   return (
-    <div className="w-full max-w-lg">
+    <div className="w-full max-w-2xl">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

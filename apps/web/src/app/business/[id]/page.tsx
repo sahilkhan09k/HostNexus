@@ -250,7 +250,7 @@ export default function BusinessProfilePage() {
     <div className="min-h-screen bg-[#FAFAFA]">
       <Navbar />
 
-      <main className="mx-auto max-w-screen-xl px-5 pt-24 pb-20 md:px-10 lg:px-16">
+      <main className="app-container pt-24 pb-20">
 
         {/* ── Breadcrumb ── */}
         <div className="mb-6 flex items-center gap-2 text-xs text-stone-400">

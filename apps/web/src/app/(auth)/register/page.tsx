@@ -279,10 +279,10 @@ export default function RegisterPage() {
   const STEP_LABELS = ["Personal", "Business", "Documents"];
 
   return (
-    <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)] lg:grid-cols-2">
+    <div className="flex w-full max-w-6xl overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)]">
 
       {/* ── Left branding panel ── */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-stone-900 p-10 lg:flex">
+      <div className="relative hidden w-[46%] shrink-0 flex-col justify-between overflow-hidden bg-stone-900 p-10 lg:flex xl:p-12">
         <div
           className="absolute inset-0 opacity-[0.06]"
           style={{ backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
@@ -336,7 +336,7 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Right form panel ── */}
-      <div className="flex flex-col justify-center overflow-y-auto p-8 md:p-10">
+      <div className="flex min-w-0 flex-1 flex-col justify-center overflow-y-auto p-8 md:p-12">
         {/* Mobile step indicator */}
         <div className="mb-5 flex items-center gap-2 lg:hidden">
           {([1, 2, 3] as Step[]).map((s) => (

@@ -15,7 +15,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <TopBar />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto overscroll-contain p-6 scroll-smooth">
+        <main className="flex-1 overflow-y-auto overscroll-contain p-6 lg:p-8 2xl:p-10 scroll-smooth">
           {children}
         </main>
       </div>

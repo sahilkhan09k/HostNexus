@@ -179,7 +179,7 @@ export default function EditResourcePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-12">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-stone-500">
         <Link href="/dashboard/inventory" className="hover:text-stone-800 transition-colors">
           My Listings

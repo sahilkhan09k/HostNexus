@@ -51,7 +51,7 @@ export function Footer() {
 
       {/* ── Newsletter strip ── */}
       <div className="border-b border-stone-100 bg-stone-50/60">
-        <div className="mx-auto flex max-w-screen-xl flex-col items-start justify-between gap-4 px-5 py-6 sm:items-center md:flex-row md:px-10 lg:px-16">
+        <div className="app-container flex flex-col items-start justify-between gap-4 py-6 sm:items-center md:flex-row">
           <div>
             <p className="text-sm font-semibold text-stone-800">
               Get notified when new resources go live
@@ -77,7 +77,7 @@ export function Footer() {
       </div>
 
       {/* ── Main grid ── */}
-      <div className="mx-auto max-w-screen-xl px-5 py-14 md:px-10 lg:px-16">
+      <div className="app-container py-14">
         <div className="grid grid-cols-2 gap-10 md:grid-cols-3 lg:grid-cols-6">
 
           {/* Brand column */}
@@ -201,7 +201,7 @@ export function Footer() {
 
       {/* ── Bottom bar ── */}
       <div className="border-t border-stone-100">
-        <div className="mx-auto flex max-w-screen-xl flex-col items-center justify-between gap-3 px-5 py-5 text-xs text-stone-400 md:flex-row md:px-10 lg:px-16">
+        <div className="app-container flex flex-col items-center justify-between gap-3 py-5 text-xs text-stone-400 md:flex-row">
           <p>© {new Date().getFullYear()} HostNexus Technologies Pvt. Ltd. All rights reserved.</p>
           <div className="flex flex-wrap items-center justify-center gap-4">
             <span className="flex items-center gap-1.5">

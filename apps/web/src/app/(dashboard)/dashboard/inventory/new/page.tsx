@@ -100,7 +100,7 @@ export default function NewResourcePage() {
 
   return (
     <div className="space-y-6">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-5xl mx-auto">
 
         {/* ── Task 5.1 — Breadcrumb ────────────────────────────────────────── */}
         <nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-1.5">

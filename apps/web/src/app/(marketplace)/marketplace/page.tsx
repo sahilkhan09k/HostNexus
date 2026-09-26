@@ -250,7 +250,7 @@ function MarketplaceContent() {
 
       {/* ── Search / controls header ── */}
       <div className="border-b border-stone-200 bg-white pt-[68px]">
-        <div className="mx-auto max-w-screen-xl px-5 py-5 md:px-10 lg:px-16">
+        <div className="app-container py-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 
             {/* Search box */}
@@ -348,7 +348,7 @@ function MarketplaceContent() {
       </div>
 
       {/* ── Main content ── */}
-      <div className="mx-auto max-w-screen-xl px-5 py-8 md:px-10 lg:px-16">
+      <div className="app-container py-8">
         <div className="flex gap-6">
 
           {/* Desktop sidebar — independent scroll */}
@@ -400,7 +400,7 @@ function MarketplaceContent() {
 
             {/* Loading skeletons */}
             {dataLoading && (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="h-72 animate-pulse rounded-2xl bg-stone-100" style={{ animationDelay: `${i * 60}ms` }} />
                 ))}
@@ -431,7 +431,7 @@ function MarketplaceContent() {
             {!dataLoading && filtered.length > 0 && (
               <div className={cn(
                 "grid gap-5",
-                view === "grid" ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" : "grid-cols-1"
+                view === "grid" ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4" : "grid-cols-1"
               )}>
                 {filtered.map((resource, i) => (
                   <ResourceCard

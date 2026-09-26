@@ -67,7 +67,7 @@ export default function ResourceForm({
   }, [submitError]);
 
   return (
-    <form onSubmit={_handleSubmit} className="space-y-8 w-full max-w-4xl mx-auto">
+    <form onSubmit={_handleSubmit} className="space-y-8 w-full max-w-6xl mx-auto">
       {submitError && !errorDismissed && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />

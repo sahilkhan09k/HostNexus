@@ -388,7 +388,7 @@ export default function ResourceDetailPage() {
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
       <Navbar />
 
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pt-24 pb-16">
+      <main className="flex-1 app-container pt-24 pb-16">
 
         {/* Breadcrumb */}
         <div className="mb-6 flex items-center gap-2 text-xs text-stone-400">

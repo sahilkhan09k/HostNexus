@@ -34,7 +34,7 @@ export function Navbar() {
             : "bg-transparent"
         )}
       >
-        <nav className="mx-auto flex h-[68px] max-w-screen-xl items-center justify-between px-5 md:px-10 lg:px-16">
+        <nav className="app-container flex h-[68px] items-center justify-between">
           {/* Logo */}
           <a href="/" className="group flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 transition-all duration-200 group-hover:bg-emerald-600">

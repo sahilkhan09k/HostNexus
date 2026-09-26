@@ -142,3 +142,20 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * App-wide sizing. The app pages are built from rem-based Tailwind utilities, so
+ * raising the root font size on wide screens scales type, cards, controls and
+ * spacing together (16px up to ~1500px wide, 18px at 1920, capped at 20px).
+ * The landing page (.hn-root) is sized in px by the design system; keep it at 16.
+ */
+html { font-size: clamp(16px, calc(0.5vw + 8.5px), 20px); }
+html:has(.hn-root) { font-size: 16px; }
+
+/* Page container matching the landing layout: wide cap, viewport-scaled gutters. */
+.app-container {
+  width: 100%;
+  max-width: var(--hn-container-max);
+  margin-inline: auto;
+  padding-inline: var(--hn-gutter);
+}

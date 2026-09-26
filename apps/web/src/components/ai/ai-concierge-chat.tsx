@@ -451,7 +451,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
 
         {/* Messages Scroll View */}
         <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div className="mx-auto max-w-3xl space-y-6">
+          <div className="mx-auto max-w-5xl space-y-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
                 <motion.div
@@ -573,7 +573,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
 
         {/* Input Bar */}
         <div className="border-t border-stone-200 bg-white p-4 md:px-8">
-          <div className="mx-auto max-w-3xl">
+          <div className="mx-auto max-w-5xl">
             {/* Quick mobile pills */}
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1 scrollbar-hide lg:hidden">
               {DEFAULT_SUGGESTIONS.slice(0, 3).map((s, idx) => (

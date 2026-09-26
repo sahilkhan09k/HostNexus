@@ -397,7 +397,7 @@ export default function AdminDashboardPage() {
 
       {/* Topbar */}
       <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-screen-xl items-center justify-between px-5 md:px-8">
+        <div className="app-container flex h-14 items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900">
               <ShieldCheck className="h-4 w-4 text-white" />
@@ -432,7 +432,7 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-screen-xl px-5 py-8 md:px-8">
+      <main className="app-container py-8">
         {/* Page title */}
         <div className="mb-6">
           <h1 className="font-display text-3xl font-semibold text-stone-900">

@@ -11,7 +11,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="flex min-h-screen flex-col bg-[#FAFAFA]">
       {/* Minimal auth navbar */}
       <header className="border-b border-stone-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-screen-xl items-center justify-between px-5 md:px-10">
+        <div className="app-container flex h-16 items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900">
               <Building2 className="h-4 w-4 text-white" strokeWidth={2.2} />
