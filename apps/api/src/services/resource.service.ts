@@ -1,5 +1,6 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
+import { VectorStoreService } from "./rag/vector-store.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
 
 export class ResourceService {
@@ -34,6 +35,9 @@ export class ResourceService {
         damagePhotos: input.damagePhotos || [],
       },
     });
+
+    // Keep vector database index in sync
+    VectorStoreService.indexSingleResource(resource).catch(() => {});
 
     return resource;
   }
@@ -137,6 +141,9 @@ export class ResourceService {
       data: input,
     });
 
+    // Keep vector database index in sync
+    VectorStoreService.indexSingleResource(updatedResource).catch(() => {});
+
     return updatedResource;
   }
 
@@ -165,6 +172,9 @@ export class ResourceService {
     await prisma.resource.delete({
       where: { id: resourceId },
     });
+
+    // Remove from vector database index
+    VectorStoreService.deleteResource(resourceId).catch(() => {});
   }
 
   /**

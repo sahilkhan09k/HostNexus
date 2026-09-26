@@ -24,6 +24,10 @@ vi.mock("lucide-react", () => ({
   Shield: () => null,
   Camera: () => null,
   X: () => null,
+  CalendarDays: () => null,
+  Calendar: () => null,
+  Plus: () => null,
+  Trash2: () => null,
 }));
 
 vi.mock("@/components/ui/image-uploader", () => ({

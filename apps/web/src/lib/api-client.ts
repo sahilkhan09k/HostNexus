@@ -376,3 +376,66 @@ export async function rejectNegotiation(bookingId: string, reason?: string): Pro
     throw new Error(err.error?.message || "Failed to reject negotiation");
   }
 }
+
+// ─── AI Concierge RAG Pipeline ─────────────────────────────────
+
+export interface AiConciergeQueryInput {
+  message: string;
+  history?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  date?: string;
+  location?: string;
+  quantity?: number;
+}
+
+export interface AiListingResult {
+  id: string;
+  title: string;
+  business: string;
+  businessId: string;
+  location: string;
+  price: string;
+  rentAmountPaise: number;
+  securityDepositPaise: number;
+  securityDeposit: string;
+  capacity: string;
+  quantityAvailable: number;
+  unit: string;
+  rating: number;
+  reviewCount: number;
+  match: number;
+  available: boolean;
+  category: string;
+  categoryColor: string;
+  bg: string;
+  whyChoose: string;
+  features: string[];
+  hasPreExistingDamage: boolean;
+  damageDescription?: string | null;
+  photos: string[];
+}
+
+export interface AiConciergeResponse {
+  reply: string;
+  results: AiListingResult[];
+  intent: string;
+  sources: string[];
+  suggestedFollowUps: string[];
+  referencedPolicies?: string[];
+}
+
+export async function queryAiConcierge(input: AiConciergeQueryInput): Promise<AiConciergeResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/ai/concierge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || "Failed to reach AI Concierge");
+  }
+
+  const data = await res.json();
+  return data.data;
+}
+
