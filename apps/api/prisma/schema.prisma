@@ -66,9 +66,6 @@ model Business {
   resources Resource[]
   sentBookingRequests     BookingRequest[] @relation("BookingSeeker")
   receivedBookingRequests BookingRequest[] @relation("BookingProvider")
-  conversationsAsA Conversation[] @relation("ConversationA")
-  conversationsAsB Conversation[] @relation("ConversationB")
-  sentMessages     Message[]      @relation("MessageSender")
   reviewsGiven     Review[]       @relation("ReviewsGiven")
   reviewsReceived  Review[]       @relation("ReviewsReceived")
   offersProposed   NegotiationOffer[] @relation("OffersProposed")
@@ -388,33 +385,3 @@ model NegotiationOffer {
   @@map("negotiation_offers")
 }
 
-model Conversation {
-  id           String    @id @default(cuid())
-  businessAId  String
-  businessBId  String
-  businessA    Business  @relation("ConversationA", fields: [businessAId], references: [id], onDelete: Cascade)
-  businessB    Business  @relation("ConversationB", fields: [businessBId], references: [id], onDelete: Cascade)
-  messages     Message[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@unique([businessAId, businessBId])
-  @@index([businessAId])
-  @@index([businessBId])
-  @@map("conversations")
-}
-
-model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderId       String
-  sender         Business     @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  content        String
-  readAt         DateTime?
-  createdAt      DateTime     @default(now())
-
-  @@index([conversationId])
-  @@index([senderId])
-  @@map("messages")
-}

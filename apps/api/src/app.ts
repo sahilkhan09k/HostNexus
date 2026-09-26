@@ -8,7 +8,6 @@ import authRoutes from "./routes/auth.routes.js";
 import businessRoutes from "./routes/business.routes.js";
 import resourceRoutes from "./routes/resource.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
-import messageRoutes from "./routes/message.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import reviewRoutes from "./routes/review.routes.js";
@@ -50,7 +49,6 @@ export function createApp(): Express {
   app.use("/api/business", businessRoutes);
   app.use("/api/resources", resourceRoutes);
   app.use("/api/bookings", bookingRoutes);
-  app.use("/api/messages", messageRoutes);
   app.use("/api/upload", uploadRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/reviews", reviewRoutes);

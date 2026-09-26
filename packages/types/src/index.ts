@@ -459,37 +459,3 @@ export interface BookingQuery {
   bookingStatus?: BookingStatus;
   financialStatus?: FinancialStatus;
 }
-
-// ─────────────────────────────────────────
-// Messaging
-// ─────────────────────────────────────────
-
-export interface Conversation {
-  id: string;
-  businessAId: string;
-  businessBId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Message {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  content: string;
-  readAt: string | null;
-  createdAt: string;
-}
-
-export interface MessageWithSender extends Message {
-  sender: {
-    id: string;
-    name: string;
-  };
-}
-
-export interface ConversationWithMessages extends Conversation {
-  messages: MessageWithSender[];
-  businessA: { id: string; name: string };
-  businessB: { id: string; name: string };
-}

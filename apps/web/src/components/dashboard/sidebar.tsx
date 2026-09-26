@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2, LayoutDashboard, Package, CalendarDays,
-  MessageSquare, BarChart3, Settings, LogOut,
+  BarChart3, Settings, LogOut,
   ChevronLeft, ChevronRight, Sparkles,
   Store,
 } from "lucide-react";
@@ -20,7 +20,6 @@ const NAV_ITEMS = [
   { href: "/dashboard/inventory",   icon: Package,         label: "My Listings" },
   { href: "/dashboard/marketplace", icon: Store,           label: "Browse Resources" },
   { href: "/dashboard/bookings",    icon: CalendarDays,    label: "Bookings",    isBookings: true },
-  { href: "/dashboard/messages",    icon: MessageSquare,   label: "Messages",    isMessages: true },
   { href: "/dashboard/ai-concierge", icon: Sparkles,        label: "AI Concierge" },
   { href: "/dashboard/analytics",   icon: BarChart3,       label: "Analytics" },
   { href: "/dashboard/settings",    icon: Settings,        label: "Settings" },
@@ -54,38 +53,11 @@ function usePendingBookings() {
   return count;
 }
 
-function useUnreadMessages() {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    if (!AuthService.getAccessToken()) return;
-
-    const fetchUnread = async () => {
-      try {
-        const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/messages/unread`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setCount(data.data?.count ?? 0);
-      } catch {
-        // silently fail — badge just won't show
-      }
-    };
-
-    fetchUnread();
-    // Refresh every 30 s for a reasonably fresh unread count
-    const interval = setInterval(fetchUnread, 30_000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return count;
-}
-
 export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const { user, business, logout } = useAuth();
   const pendingBookings = usePendingBookings();
-  const unreadMessages = useUnreadMessages();
 
   const avatarInitial = (business?.name ?? user?.email ?? "?")[0].toUpperCase();
   const displayName = business?.name ?? "Loading...";
@@ -129,11 +101,7 @@ export function DashboardSidebar() {
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
-            const badge = item.isBookings && pendingBookings > 0
-              ? pendingBookings
-              : item.isMessages && unreadMessages > 0
-              ? unreadMessages
-              : null;
+            const badge = item.isBookings && pendingBookings > 0 ? pendingBookings : null;
             return (
               <li key={item.href}>
                 <Link
