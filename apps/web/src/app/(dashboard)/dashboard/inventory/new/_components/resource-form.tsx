@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, DollarSign, Info, Loader2, ShieldCheck, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, DollarSign, Info, Loader2, ShieldCheck, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RESOURCE_TYPES } from "@/schemas/resource.schema";
 import { useResourceForm, type FormValues } from "../_hooks/use-resource-form";
@@ -286,6 +286,69 @@ export default function ResourceForm({
             {touched.securityDeposit && errors.securityDeposit && <p className={ERROR_BASE}>{errors.securityDeposit}</p>}
             <p className="text-[11px] text-stone-400 mt-1">Held in escrow; auto-released 2h after return if no damage reported.</p>
           </div>
+        </div>
+
+        {/* Transport offering */}
+        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-start gap-2.5">
+              <Truck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <label htmlFor="transportAvailable" className="text-sm font-semibold text-stone-900 block">
+                  I can provide transport
+                </label>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Renters can choose your transport (charged per km) or arrange their own.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="transportAvailable"
+              role="switch"
+              aria-checked={values.transportAvailable}
+              aria-label="I can provide transport"
+              onClick={() => handleChange("transportAvailable", !values.transportAvailable)}
+              disabled={isSubmitting}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2",
+                values.transportAvailable ? "bg-emerald-600" : "bg-stone-300"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  values.transportAvailable ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          {values.transportAvailable && (
+            <div className="sm:w-1/2">
+              <label htmlFor="transportRatePerKm" className={LABEL_BASE}>Transport Charge per km (₹ INR) *</label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
+                <input
+                  id="transportRatePerKm"
+                  name="transportRatePerKm"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  placeholder="e.g. 25"
+                  value={values.transportRatePerKm || ""}
+                  disabled={isSubmitting}
+                  onChange={(e) => handleChange("transportRatePerKm", parseFloat(e.target.value) || 0)}
+                  onBlur={() => handleBlur("transportRatePerKm")}
+                  className={cn(INPUT_BASE, "pl-8 bg-white", touched.transportRatePerKm && errors.transportRatePerKm && INPUT_ERROR)}
+                />
+              </div>
+              {touched.transportRatePerKm && errors.transportRatePerKm && (
+                <p className={ERROR_BASE}>{errors.transportRatePerKm}</p>
+              )}
+              <p className="text-[11px] text-stone-400 mt-1">Paid to you with the rent once the renter accepts the handover.</p>
+            </div>
+          )}
         </div>
 
         {/* Guideline recommendation note */}

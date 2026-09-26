@@ -102,6 +102,8 @@ export interface Resource {
   hasPreExistingDamage: boolean;
   damageDescription: string | null;
   damagePhotos: string[];
+  transportAvailable: boolean;
+  transportRatePerKmPaise: number;
 
   createdAt: string;
   updatedAt: string;
@@ -129,6 +131,8 @@ export interface CreateResourceInput {
   hasPreExistingDamage?: boolean;
   damageDescription?: string;
   damagePhotos?: string[];
+  transportAvailable?: boolean;
+  transportRatePerKmPaise?: number;
 }
 
 export interface UpdateResourceInput {
@@ -146,6 +150,8 @@ export interface UpdateResourceInput {
   hasPreExistingDamage?: boolean;
   damageDescription?: string;
   damagePhotos?: string[];
+  transportAvailable?: boolean;
+  transportRatePerKmPaise?: number;
 }
 
 export interface ResourceQuery {
@@ -330,6 +336,10 @@ export interface BookingRequest {
   rentAmountPaise: number;
   securityDepositPaise: number;
   totalAmountPaise: number;
+  transportMode: "SELF" | "PROVIDER";
+  transportDistanceKm: number | null;
+  transportRatePerKmPaise: number;
+  transportFeePaise: number;
 
   // Snapshots at booking creation
   conditionSnapshot: Record<string, unknown> | null;
@@ -402,6 +412,8 @@ export interface CreateBookingRequestInput {
   startDate: string;
   endDate: string;
   specialRequests?: string;
+  transportMode?: "SELF" | "PROVIDER";
+  transportDistanceKm?: number;
 }
 
 export interface RenterReceivingInspectionInput {

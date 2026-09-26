@@ -34,6 +34,8 @@ export interface ResourceCardData {
   hasPreExistingDamage?: boolean;
   damageDescription?: string | null;
   damagePhotos?: string[];
+  transportAvailable?: boolean;
+  transportRatePerKmPaise?: number;
 }
 
 interface ResourceCardProps {
@@ -177,6 +179,11 @@ export function ResourceCard({ data, index = 0, onBook, onViewDetails }: Resourc
             {data.securityDepositPaise !== undefined && data.securityDepositPaise > 0 && (
               <div className="text-[10px] font-medium text-emerald-700">
                 + ₹{(data.securityDepositPaise / 100).toLocaleString()} deposit
+              </div>
+            )}
+            {data.transportAvailable && (
+              <div className="text-[10px] font-medium text-stone-500">
+                Transport ₹{((data.transportRatePerKmPaise ?? 0) / 100).toLocaleString()}/km
               </div>
             )}
           </div>

@@ -26,6 +26,8 @@ describe("useResourceForm", () => {
       hasPreExistingDamage: false,
       damageDescription: "",
       damagePhotos: [],
+      transportAvailable: false,
+      transportRatePerKm: 0,
     });
   });
 
@@ -199,6 +201,8 @@ describe("useResourceForm", () => {
       hasPreExistingDamage: false,
       damageDescription: "",
       damagePhotos: [],
+      transportAvailable: false,
+      transportRatePerKm: 0,
     });
     expect(result.current.errors).toEqual({});
     expect(result.current.touched).toEqual({});

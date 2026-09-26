@@ -57,7 +57,18 @@ export const createResourceSchema = z
     hasPreExistingDamage: z.boolean().default(false),
     damageDescription: z.string().optional().nullable(),
     damagePhotos: z.array(z.string()).default([]),
+
+    // Owner-provided transport, charged per km (paise)
+    transportAvailable: z.boolean().optional(),
+    transportRatePerKmPaise: z.number().int().min(0, "Transport rate cannot be negative").optional(),
   })
+  .refine(
+    (data) => !data.transportAvailable || (data.transportRatePerKmPaise ?? 0) > 0,
+    {
+      message: "Transport rate per km is required when transport is offered",
+      path: ["transportRatePerKmPaise"],
+    }
+  )
   .refine(
     (data) => {
       if (data.hasPreExistingDamage) {
@@ -104,8 +115,18 @@ export const updateResourceSchema = z
     hasPreExistingDamage: z.boolean().optional(),
     damageDescription: z.string().optional().nullable(),
     damagePhotos: z.array(z.string()).optional(),
+
+    transportAvailable: z.boolean().optional(),
+    transportRatePerKmPaise: z.number().int().min(0).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) => data.transportAvailable !== true || (data.transportRatePerKmPaise ?? 0) > 0,
+    {
+      message: "Transport rate per km is required when transport is offered",
+      path: ["transportRatePerKmPaise"],
+    }
+  );
 
 export const resourceQuerySchema = z.object({
   businessId:   z.string().optional(),

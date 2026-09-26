@@ -18,6 +18,8 @@ export interface FormValues {
   hasPreExistingDamage: boolean;
   damageDescription: string;
   damagePhotos: string[];
+  transportAvailable: boolean;
+  transportRatePerKm: number;
 }
 
 export interface FormErrors {
@@ -34,6 +36,8 @@ export interface FormErrors {
   hasPreExistingDamage?: string;
   damageDescription?: string;
   damagePhotos?: string;
+  transportAvailable?: string;
+  transportRatePerKm?: string;
 }
 
 export type FormTouched = {
@@ -54,6 +58,8 @@ const DEFAULT_VALUES: FormValues = {
   hasPreExistingDamage: false,
   damageDescription: "",
   damagePhotos: [],
+  transportAvailable: false,
+  transportRatePerKm: 0,
 };
 
 export interface UseResourceFormOptions {
@@ -168,6 +174,8 @@ export function useResourceForm(
       hasPreExistingDamage: true,
       damageDescription: true,
       damagePhotos: true,
+      transportAvailable: true,
+      transportRatePerKm: true,
     };
     setTouched(allTouched);
 
@@ -201,6 +209,10 @@ export function useResourceForm(
         hasPreExistingDamage: values.hasPreExistingDamage,
         damageDescription: values.hasPreExistingDamage ? values.damageDescription : undefined,
         damagePhotos: values.hasPreExistingDamage ? values.damagePhotos : [],
+        transportAvailable: values.transportAvailable,
+        transportRatePerKmPaise: values.transportAvailable
+          ? Math.round(Number(values.transportRatePerKm) * 100)
+          : 0,
       };
 
       const response = await AuthService.fetchWithAuth(endpoint, {

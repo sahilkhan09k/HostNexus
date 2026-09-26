@@ -31,6 +31,8 @@ interface ApiResource {
   hasPreExistingDamage?: boolean;
   damageDescription?: string | null;
   damagePhotos?: string[];
+  transportAvailable?: boolean;
+  transportRatePerKmPaise?: number;
   business: {
     id: string; name: string;
     city: string | null; state: string | null; businessType: string | null;
@@ -66,6 +68,7 @@ function mapApiResource(r: ApiResource): ResourceCardData {
     rentAmountPaise: r.rentAmountPaise, securityDepositPaise: r.securityDepositPaise,
     photos: r.photos, hasPreExistingDamage: r.hasPreExistingDamage,
     damageDescription: r.damageDescription, damagePhotos: r.damagePhotos,
+    transportAvailable: r.transportAvailable, transportRatePerKmPaise: r.transportRatePerKmPaise,
   };
 }
 
