@@ -12,6 +12,7 @@ vi.mock("../config/database.js", () => ({
     bookingRequest: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn(),
       update: vi.fn(),
     },
@@ -80,8 +81,9 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
     (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockResource);
     (prisma.bookingRequest.create as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ id: "book-1", ...data }));
 
-    const start = new Date(Date.now() + 86400000).toISOString();
-    const end = new Date(Date.now() + 86400000 * 3).toISOString(); // 2 days
+    const now = Date.now();
+    const start = new Date(now + 86400000).toISOString();
+    const end = new Date(now + 86400000 * 3).toISOString(); // exactly 2 days
 
     const booking = await BookingService.createBookingRequest(renterUserId, {
       resourceId: "res-100",

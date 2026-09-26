@@ -213,9 +213,12 @@ export class BookingService {
     }
 
     // FIX #17a: Availability window check
-    const hasAvailability = resource.availabilityWindows.some(
-      (w) => w.fromDate <= startDate && w.toDate >= endDate
-    );
+    const hasAvailability =
+      !resource.availabilityWindows ||
+      resource.availabilityWindows.length === 0 ||
+      resource.availabilityWindows.some(
+        (w) => w.fromDate <= startDate && w.toDate >= endDate
+      );
     if (!hasAvailability) {
       throw new Error(
         "The resource is not available for the requested date range. Please check the owner's availability calendar."

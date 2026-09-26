@@ -13,6 +13,7 @@ import uploadRoutes from "./routes/upload.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import reviewRoutes from "./routes/review.routes.js";
 import negotiationRoutes from "./routes/negotiation.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 export function createApp(): Express {
@@ -54,6 +55,7 @@ export function createApp(): Express {
   app.use("/api/admin", adminRoutes);
   app.use("/api/reviews", reviewRoutes);
   app.use("/api/negotiations", negotiationRoutes);
+  app.use("/api/ai", aiRoutes);
 
   // Centralized error handling
   app.use(errorHandler);

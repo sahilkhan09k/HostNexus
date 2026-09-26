@@ -10,6 +10,14 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid database connection string"),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters long"),
   REFRESH_TOKEN_SECRET: z.string().min(32, "REFRESH_TOKEN_SECRET must be at least 32 characters long"),
+  GEMINI_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GROQ_API_KEY: z.string().optional(),
+  CHROMA_API_KEY: z.string().optional(),
+  CHROMA_HOST: z.string().optional(),
+  CHROMA_SERVER_URL: z.string().optional(),
+  CHROMA_TENANT: z.string().optional(),
+  CHROMA_DATABASE: z.string().optional(),
 });
 
 function validateEnv() {
