@@ -34,6 +34,13 @@ const INDIAN_STATES = [
 
 type Step = 1 | 2 | 3;
 
+const FIELD_LABELS: Record<string, string> = {
+  email: "Email", password: "Password", ownerName: "Full name", phone: "Phone",
+  businessName: "Business name", businessType: "Business type", addressLine: "Address",
+  city: "City", state: "State", pincode: "Pincode",
+  gstCertificateUrl: "GST Certificate", aadhaarUrl: "Aadhaar",
+};
+
 interface DocUploadState {
   file: File | null;
   url: string | null;
@@ -226,8 +233,11 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
+      const trimmed = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, k === "password" ? v : v.trim()])
+      );
       const payload = {
-        ...form,
+        ...trimmed,
         gstCertificateUrl: gstDoc.url,
         aadhaarUrl: aadhaarDoc.url,
       };
@@ -241,9 +251,11 @@ export default function RegisterPage() {
       const data = await res.json();
 
       if (!res.ok) {
+        // Validation errors carry the useful per-field message in details
+        const detail = data?.error?.details?.[0];
         throw new Error(
+          (detail && `${FIELD_LABELS[detail.path?.[0]] ?? detail.path?.[0]}: ${detail.message}`) ||
           data?.error?.message ||
-          data?.error?.details?.[0]?.message ||
           "Registration failed"
         );
       }
@@ -375,7 +387,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Your full name" value={form.ownerName} onChange={set("ownerName")} className={inputCls} />
+                  <input type="text" required minLength={2} placeholder="Your full name" value={form.ownerName} onChange={set("ownerName")} className={inputCls} />
                 </div>
               </div>
 
@@ -383,7 +395,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Email</label>
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="email" required placeholder="you@yourbusiness.com" value={form.email} onChange={set("email")} className={inputCls} />
+                  <input type="email" required pattern="[^@\s]+@[^@\s]+\.[^@\s]{2,}" title="Enter a valid email like you@business.com" placeholder="you@yourbusiness.com" value={form.email} onChange={set("email")} className={inputCls} />
                 </div>
               </div>
 
@@ -391,7 +403,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Mobile Number</label>
                 <div className="relative">
                   <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="tel" required placeholder="+91 98765 43210" value={form.phone} onChange={set("phone")}
+                  <input type="tel" required placeholder="9876543210" value={form.phone} onChange={set("phone")}
                     pattern="[0-9]{10,13}" title="Enter a valid 10-digit mobile number" className={inputCls} />
                 </div>
               </div>
@@ -419,7 +431,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Name</label>
                 <div className="relative">
                   <Building className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Your registered business name" value={form.businessName} onChange={set("businessName")} className={inputCls} />
+                  <input type="text" required minLength={2} placeholder="Your registered business name" value={form.businessName} onChange={set("businessName")} className={inputCls} />
                 </div>
               </div>
 
@@ -436,14 +448,14 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Address</label>
                 <div className="relative">
                   <MapPin className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Street / Area / Locality" value={form.addressLine} onChange={set("addressLine")} className={inputCls} />
+                  <input type="text" required minLength={5} title="Enter at least 5 characters" placeholder="Street / Area / Locality" value={form.addressLine} onChange={set("addressLine")} className={inputCls} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">City</label>
-                  <input type="text" required placeholder="Pune" value={form.city} onChange={set("city")}
+                  <input type="text" required minLength={2} placeholder="Pune" value={form.city} onChange={set("city")}
                     className="w-full rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-800 placeholder:text-stone-400 focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all" />
                 </div>
                 <div>

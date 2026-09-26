@@ -41,7 +41,7 @@
   --hn-space-1: 4px; --hn-space-2: 8px; --hn-space-3: 12px; --hn-space-4: 16px; --hn-space-5: 20px; --hn-space-6: 24px;
   --hn-space-8: 32px; --hn-space-10: 40px; --hn-space-12: 48px; --hn-space-16: 64px; --hn-space-20: 80px;
   --hn-space-24: 96px; --hn-space-32: 128px;
-  --hn-container-max: 1280px; --hn-gutter: 64px; --hn-section-y: 112px;
+  --hn-container-max: 2000px; --hn-gutter: clamp(64px, 5vw, 112px); --hn-section-y: 112px;
   --hn-radius-xs: 6px; --hn-radius-sm: 10px; --hn-radius-md: 14px; --hn-radius-lg: 20px; --hn-radius-xl: 28px; --hn-radius-pill: 999px;
   --hn-control-h-sm: 36px; --hn-control-h-md: 44px; --hn-control-h-lg: 52px;
 
