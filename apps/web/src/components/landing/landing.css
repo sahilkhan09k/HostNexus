@@ -348,8 +348,8 @@
 @media (max-width: 640px) { .hn-cta__content { padding: 72px 20px; } }
 
 /* ── Footer ───────────────────────────────── */
-.hn-footer { background: var(--hn-ink-950); color: var(--hn-white); }
-.hn-footer__inner { display: flex; flex-direction: column; gap: 40px; padding-top: 56px; padding-bottom: 28px; }
+.hn-footer { background: var(--hn-ink-950); color: var(--hn-white); overflow: hidden; }
+.hn-footer__inner { display: flex; flex-direction: column; gap: 40px; padding-top: 56px; padding-bottom: 0; }
 .hn-footer__grid { display: grid; grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); gap: 40px; }
 .hn-footer__brand { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 420px; }
 .hn-footer__logo { font: 500 22px var(--hn-font-sans); letter-spacing: -0.04em; }
@@ -371,6 +371,13 @@
 }
 .hn-footer__bottom-meta { display: flex; gap: 20px; flex-wrap: wrap; }
 .hn-footer__bottom .hn-footer__link { font-size: 12px; }
+/* Oversized solid wordmark sitting on the footer's bottom edge (design system: Type / Wordmark scale).
+   Sized from the container's inner width so it spans edge to edge at every screen size. */
+.hn-footer__wordmark {
+  display: flex; justify-content: center; margin-bottom: -0.06em;
+  font: 500 calc((min(100vw, var(--hn-container-max)) - 2 * var(--hn-gutter)) * 0.222)/0.8 var(--hn-font-sans);
+  letter-spacing: -0.05em; white-space: nowrap; color: var(--hn-white); user-select: none;
+}
 @media (max-width: 640px) {
   .hn-footer__inner { padding-top: 48px; gap: 32px; }
   .hn-footer__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

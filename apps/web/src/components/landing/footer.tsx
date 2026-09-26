@@ -37,6 +37,8 @@ export function LandingFooter() {
             <span>Made in Pune, India</span>
           </div>
         </div>
+
+        <div className="hn-footer__wordmark" aria-hidden="true">HostNexus</div>
       </Container>
     </footer>
   );
