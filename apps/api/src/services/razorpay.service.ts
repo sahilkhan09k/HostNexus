@@ -1,5 +1,6 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { safeEqual } from "./booking-rules.js";
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
@@ -38,8 +39,12 @@ export class RazorpayService {
     };
   }
 
+  static keyId(): string {
+    return process.env.RAZORPAY_KEY_ID!;
+  }
+
   /**
-   * Verify Razorpay payment signature (HMAC-SHA256).
+   * Verify Razorpay payment signature (HMAC-SHA256), in constant time.
    * Must be called after the frontend completes the checkout.
    *
    * Signature = HMAC_SHA256(razorpay_order_id + "|" + razorpay_payment_id, key_secret)
@@ -55,13 +60,42 @@ export class RazorpayService {
       .update(body)
       .digest("hex");
 
-    return expectedSignature === razorpaySignature;
+    return safeEqual(expectedSignature, razorpaySignature);
   }
 
   /**
-   * Fetch a payment from Razorpay to confirm captured status.
+   * Fetch a payment from Razorpay to confirm its order, amount and status.
    */
   static async fetchPayment(paymentId: string) {
     return razorpay.payments.fetch(paymentId);
+  }
+
+  /** All payment attempts made against an order (to recover a payment whose verify call never arrived). */
+  static async fetchOrderPayments(orderId: string) {
+    const res = await razorpay.orders.fetchPayments(orderId);
+    return res.items;
+  }
+
+  /** Capture an authorized payment (needed when the account doesn't auto-capture). */
+  static async capturePayment(paymentId: string, amountPaise: number) {
+    return razorpay.payments.capture(paymentId, amountPaise, "INR");
+  }
+
+  /**
+   * Refund part or all of a captured payment. `ledgerRef` is stored in the
+   * refund notes so a retry can detect a refund that already went through.
+   */
+  static async refund(paymentId: string, amountPaise: number, ledgerRef: string) {
+    return razorpay.payments.refund(paymentId, {
+      amount: amountPaise,
+      speed: "normal",
+      notes: { ledgerRef, platform: "HostNexus" },
+    });
+  }
+
+  /** Find an existing refund on a payment by our ledger reference. */
+  static async findRefundByLedgerRef(paymentId: string, ledgerRef: string) {
+    const res = await razorpay.payments.fetchMultipleRefund(paymentId, { count: 100 } as any);
+    return res.items.find((r) => (r.notes as Record<string, string> | undefined)?.ledgerRef === ledgerRef) ?? null;
   }
 }

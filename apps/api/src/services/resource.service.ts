@@ -1,7 +1,9 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { VectorStoreService } from "./rag/vector-store.js";
-import { getCommittedQuantities } from "./capacity.js";
+import { getCommittedQuantities, getPeakCommittedQuantity } from "./capacity.js";
+import { TERMINAL_BOOKING_STATUSES, todayIst } from "./booking-rules.js";
+import { conflict, forbidden, notFound } from "../utils/http-error.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
 
 export class ResourceService {
@@ -59,6 +61,7 @@ export class ResourceService {
     // Build where clause
     const where: any = {
       businessId: business.id,
+      deletedAt: null,
     };
 
     if (query.resourceType) {
@@ -86,11 +89,11 @@ export class ResourceService {
 
   /**
    * Get a resource by ID — public read, no ownership check.
-   * Used by marketplace detail pages and the booking flow.
+   * Used by marketplace detail pages and the booking flow. Deleted listings are gone.
    */
   static async getResourceById(resourceId: string) {
-    const resource = await prisma.resource.findUnique({
-      where: { id: resourceId },
+    const resource = await prisma.resource.findFirst({
+      where: { id: resourceId, deletedAt: null },
       include: {
         business: {
           select: { id: true, name: true, ownerId: true, city: true, state: true, businessType: true },
@@ -127,15 +130,26 @@ export class ResourceService {
       where: { id: resourceId },
     });
 
-    if (!resource) {
-      throw new Error("Resource not found");
+    if (!resource || resource.deletedAt) {
+      throw notFound("Resource not found");
     }
 
     // Verify user owns the business that owns this resource
     const isOwner = await BusinessService.verifyOwnership(resource.businessId, userId);
 
     if (!isOwner) {
-      throw new Error("Unauthorized: You can only update resources belonging to your business");
+      throw forbidden("Unauthorized: You can only update resources belonging to your business");
+    }
+
+    // Quantity can't drop below what accepted bookings already need on any future day
+    if (input.quantity !== undefined && input.quantity < resource.quantity) {
+      const peak = await getPeakCommittedQuantity(prisma, resourceId, todayIst());
+      if (input.quantity < peak) {
+        throw conflict(
+          `Accepted bookings need up to ${peak} unit(s) on a single day, so the quantity can't go below ${peak}.`,
+          "QUANTITY_BELOW_BOOKED"
+        );
+      }
     }
 
     // Update resource
@@ -160,20 +174,32 @@ export class ResourceService {
       where: { id: resourceId },
     });
 
-    if (!resource) {
-      throw new Error("Resource not found");
+    if (!resource || resource.deletedAt) {
+      throw notFound("Resource not found");
     }
 
     // Verify user owns the business that owns this resource
     const isOwner = await BusinessService.verifyOwnership(resource.businessId, userId);
 
     if (!isOwner) {
-      throw new Error("Unauthorized: You can only delete resources belonging to your business");
+      throw forbidden("Unauthorized: You can only delete resources belonging to your business");
     }
 
-    // Delete resource
-    await prisma.resource.delete({
+    // A listing with bookings still in progress can't be removed
+    const openBookings = await prisma.bookingRequest.count({
+      where: { resourceId, bookingStatus: { notIn: TERMINAL_BOOKING_STATUSES } },
+    });
+    if (openBookings > 0) {
+      throw conflict(
+        `This listing has ${openBookings} booking(s) in progress. Finish or cancel them before deleting it, or deactivate the listing instead.`,
+        "LISTING_HAS_OPEN_BOOKINGS"
+      );
+    }
+
+    // Soft delete: hidden everywhere, booking history and ledger kept
+    await prisma.resource.update({
       where: { id: resourceId },
+      data: { deletedAt: new Date(), isActive: false },
     });
 
     // Remove from vector database index
@@ -188,7 +214,12 @@ export class ResourceService {
     query: ResourceQuery & { startDate?: string; endDate?: string },
     excludeBusinessId?: string            // caller's own businessId — excluded from results
   ) {
-    const where: any = { isActive: true };
+    // Only live listings from owners whose account is still verified (not suspended)
+    const where: any = {
+      isActive: true,
+      deletedAt: null,
+      business: { owner: { verificationStatus: "VERIFIED" } },
+    };
     if (query.resourceType) where.resourceType = query.resourceType;
     if (query.status)       where.status       = query.status;
 
@@ -196,6 +227,7 @@ export class ResourceService {
     if (excludeBusinessId) {
       where.businessId = { not: excludeBusinessId };
     }
+    // (inclusive dates: a window from the 1st to the 10th covers a booking ending on the 10th)
 
     // Date-availability server-side filter
     let dateRange: { start: Date; end: Date } | null = null;

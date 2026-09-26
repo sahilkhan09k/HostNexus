@@ -73,7 +73,7 @@ export default function InventoryPage() {
 
   const handleDelete = async (resource: Resource) => {
     const confirmed = window.confirm(
-      "Delete this resource? This cannot be undone."
+      "Delete this resource? It is removed from the marketplace and your inventory; its past bookings stay in your history."
     );
     if (!confirmed) return;
 
@@ -87,7 +87,9 @@ export default function InventoryPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to delete resource");
+        // e.g. 409 when the listing still has bookings in progress
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error?.message || "Failed to delete resource");
       }
 
       addToast("success", "Resource deleted successfully.");

@@ -1,4 +1,5 @@
 import { AuthService } from "./auth";
+import { openRazorpayCheckout } from "./razorpay";
 import type {
   Resource,
   ResourceWithBusiness,
@@ -8,11 +9,12 @@ import type {
   BookingRequestWithDetails,
   CreateBookingRequestInput,
   RenterReceivingInspectionInput,
+  HandoverInput,
+  OwnerHandoverResponseInput,
   ReturnInitiationInput,
   OwnerReceiptInput,
   OwnerDamageClaimInput,
   RenterClaimResponseInput,
-  AdminResolveDisputeInput,
 } from "@hostnexus/types";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -183,28 +185,75 @@ export async function updateBookingStatus(id: string, status: "accepted" | "reje
   return data.data.bookingRequest;
 }
 
-export async function payEscrow(bookingId: string): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/pay`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to fund escrow");
-  }
-  const data = await res.json();
-  return data.data.booking;
+interface PaymentOrder {
+  orderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+  totalAmountPaise: number;
+  paymentDeadline: string | null;
 }
 
-export async function markHandover(bookingId: string): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/handover`, {
+async function postJson<T>(path: string, body: unknown, fallback: string, pick: (data: any) => T): Promise<T> {
+  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}${path}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
   });
+  const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to mark handover");
+    const err = new Error(json.error?.message || json.error?.details?.[0]?.message || fallback);
+    (err as Error & { code?: string }).code = json.error?.code;
+    throw err;
   }
-  const data = await res.json();
-  return data.data.booking;
+  return pick(json.data);
+}
+
+/**
+ * Pay a booking into escrow: create (or reuse) its Razorpay order, open
+ * Checkout, then have the API verify the payment with Razorpay and fund escrow.
+ */
+export async function payForBooking(
+  bookingId: string,
+  opts: { description: string; prefill?: { name?: string; email?: string; contact?: string } }
+): Promise<BookingRequest | null> {
+  let order: PaymentOrder;
+  try {
+    order = await postJson<PaymentOrder>(`/api/bookings/${bookingId}/pay`, {}, "Failed to start payment", (d) => d);
+  } catch (err) {
+    // An earlier checkout already went through; escrow is funded
+    if ((err as Error & { code?: string }).code === "ALREADY_PAID") return null;
+    throw err;
+  }
+
+  const result = await openRazorpayCheckout({
+    keyId: order.keyId,
+    orderId: order.orderId,
+    amountPaise: order.amount,
+    description: opts.description,
+    prefill: opts.prefill,
+  });
+
+  return postJson<BookingRequest>(
+    `/api/bookings/${bookingId}/pay/verify`,
+    {
+      razorpayOrderId: result.razorpay_order_id,
+      razorpayPaymentId: result.razorpay_payment_id,
+      razorpaySignature: result.razorpay_signature,
+    },
+    "Payment could not be verified",
+    (d) => d.booking
+  );
+}
+
+/** Owner: enter the renter's handover code and upload condition photos. */
+export async function markHandover(bookingId: string, input: HandoverInput): Promise<BookingRequest> {
+  return postJson(`/api/bookings/${bookingId}/handover`, input, "Failed to verify handover", (d) => d.booking);
+}
+
+/** Owner: accept (renter refunded in full) or contest (goes to admin) a handover issue. */
+export async function respondToHandoverIssue(bookingId: string, input: OwnerHandoverResponseInput): Promise<BookingRequest> {
+  return postJson(`/api/bookings/${bookingId}/handover-response`, input, "Failed to respond to the issue", (d) => d.booking);
 }
 
 export async function submitRenterInspection(bookingId: string, input: RenterReceivingInspectionInput): Promise<BookingRequest> {
@@ -291,20 +340,6 @@ export async function submitRenterClaimResponse(bookingId: string, input: Renter
   return data.data.booking;
 }
 
-export async function adminResolveDispute(bookingId: string, input: AdminResolveDisputeInput): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/resolve-dispute`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to resolve dispute");
-  }
-  const data = await res.json();
-  return data.data.booking;
-}
-
 // ─────────────────────────────────────────
 // Negotiation APIs
 // ─────────────────────────────────────────
@@ -379,9 +414,17 @@ export async function rejectNegotiation(bookingId: string, reason?: string): Pro
 
 // ─── AI Concierge RAG Pipeline ─────────────────────────────────
 
+/**
+ * Conversation memory the concierge returns with each reply. The chat sends it
+ * back unchanged with the next message so follow-ups ("what about Mumbai?",
+ * "is the first one free on 30th?") are understood. Treat it as opaque.
+ */
+export type AiConciergeContext = Record<string, unknown> & { v: 1 };
+
 export interface AiConciergeQueryInput {
   message: string;
   history?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  context?: AiConciergeContext;
   date?: string;
   location?: string;
   quantity?: number;
@@ -400,9 +443,20 @@ export interface AiListingResult {
   capacity: string;
   quantityAvailable: number;
   unit: string;
-  rating: number;
+  /** Average renter rating; null when the owner has no reviews yet */
+  rating: number | null;
   reviewCount: number;
+  /** % of the requested quantity this listing can supply by itself */
   match: number;
+  /** Which requested item this card answers, e.g. "chairs" */
+  matchedFor: string;
+  requestedQuantity: number | null;
+  /** e.g. "Has 20 of the 30 chairs you need on 28 Oct 2026" */
+  fitLabel: string;
+  /** MATCH meets everything asked; ALTERNATIVE is the right item but misses something (see caveats) */
+  tier: "MATCH" | "ALTERNATIVE";
+  /** e.g. "Not in Pune — in Mumbai", "Over your ₹50,000 budget by ₹5,000" */
+  caveats: string[];
   available: boolean;
   category: string;
   categoryColor: string;
@@ -416,6 +470,7 @@ export interface AiListingResult {
 
 export interface AiConciergeResponse {
   reply: string;
+  context?: AiConciergeContext;
   results: AiListingResult[];
   intent: string;
   sources: string[];

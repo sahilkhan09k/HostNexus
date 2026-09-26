@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { CAPACITY_HOLDING_STATUSES, getCommittedQuantity } from "./capacity.js";
+import { toCalendarDay } from "./booking-rules.js";
 
 export interface CreateWindowInput {
   fromDate: string; // ISO date string
@@ -143,10 +144,14 @@ export class AvailabilityService {
     endDate: string,
     quantity = 1
   ) {
-    const start = new Date(startDate);
-    const end   = new Date(endDate);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()))
+    // Inclusive calendar days, same model as bookings
+    let start: Date, end: Date;
+    try {
+      start = toCalendarDay(startDate);
+      end   = toCalendarDay(endDate);
+    } catch {
       throw new Error("Invalid date format");
+    }
 
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
@@ -170,8 +175,8 @@ export class AvailabilityService {
       where: {
         resourceId,
         bookingStatus: { in: CAPACITY_HOLDING_STATUSES },
-        startDate: { lt: end },
-        endDate:   { gt: start },
+        startDate: { lte: end },
+        endDate:   { gte: start },
       },
       select: { id: true, startDate: true, endDate: true, bookingStatus: true, quantity: true },
     });

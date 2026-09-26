@@ -1,12 +1,14 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { BookingService } from "./booking.service.js";
+import { badRequest, conflict, forbidden, notFound } from "../utils/http-error.js";
 
 // ─── Logic ───────────────────────────────────────────────────
 //
 // Flow:
 //   1. Renter creates booking request at listed price (status: BOOKING_REQUESTED)
-//   2. Before owner accepts, EITHER side can open a negotiation:
+//   2. While the booking is still a request (never after acceptance, so the
+//      price is fixed before any payment order exists), EITHER side can negotiate:
 //      - Renter sends initial offer (lower than listed price)
 //      - Owner counters or accepts
 //   3. Counter-offers ping-pong until:
@@ -17,8 +19,16 @@ import { BookingService } from "./booking.service.js";
 // Invariant: only ONE open negotiation per booking at a time.
 
 export class NegotiationService {
-  /** Get full negotiation thread for a booking (public to both parties) */
-  static async getByBookingId(bookingId: string) {
+  /** Full negotiation thread for a booking — only the renter and the owner can read it. */
+  static async getByBookingId(bookingId: string, userId: string) {
+    const business = await BusinessService.getBusinessByUserId(userId);
+    const booking = await prisma.bookingRequest.findUnique({
+      where: { id: bookingId },
+      select: { seekerId: true, providerId: true },
+    });
+    if (!booking || !business || (booking.seekerId !== business.id && booking.providerId !== business.id)) {
+      throw notFound("Booking not found");
+    }
     return prisma.negotiation.findUnique({
       where: { bookingId },
       include: {
@@ -44,24 +54,25 @@ export class NegotiationService {
     offeredAmountPaise: number,
     message?: string
   ) {
-    if (offeredAmountPaise <= 0) throw new Error("Offer amount must be greater than 0");
+    if (offeredAmountPaise <= 0) throw badRequest("Offer amount must be greater than 0");
 
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("You must have a business to negotiate");
+    if (!business) throw forbidden("You must have a business to negotiate");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
       include: { seeker: true, provider: true, negotiation: { include: { offers: { orderBy: { createdAt: "desc" }, take: 1 } } } },
     });
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("You are not a party to this booking");
+    if (!isSeeker && !isProvider) throw forbidden("You are not a party to this booking");
 
-    // Negotiation only allowed while booking is in BOOKING_REQUESTED state
-    if (!["BOOKING_REQUESTED", "BOOKING_ACCEPTED"].includes(booking.bookingStatus)) {
-      throw new Error("Negotiation is only possible before the booking is funded");
+    // Price is only negotiable while the booking is a pending request. Once the
+    // owner accepts, the amount is locked so a payment order can't go stale.
+    if (booking.bookingStatus !== "BOOKING_REQUESTED") {
+      throw conflict("The price can only be negotiated before the owner accepts the booking");
     }
 
     const proposerRole = isSeeker ? "SEEKER" : "PROVIDER";
@@ -76,13 +87,13 @@ export class NegotiationService {
           include: { offers: { include: { proposer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
         }) as any;
       } else if (negotiation.status !== "OPEN") {
-        throw new Error("This negotiation is no longer open");
+        throw conflict("This negotiation is no longer open");
       }
 
       // ── Validate turn-order: caller must be the OTHER party from the last offer ──
       const lastOffer = negotiation!.offers?.[0];
       if (lastOffer && lastOffer.proposerRole === proposerRole) {
-        throw new Error("It is not your turn — wait for the other party to respond");
+        throw conflict("It is not your turn — wait for the other party to respond");
       }
 
       // ── Mark previous pending offer as COUNTERED ──
@@ -122,83 +133,48 @@ export class NegotiationService {
 
   /**
    * Accept the current pending offer.
-   * - Updates the booking's rentAmountPaise to the agreed price.
-   * - Closes the negotiation as ACCEPTED.
-   * - Transitions booking to BOOKING_ACCEPTED.
+   * Goes through the same locked, capacity-checked path as a normal owner
+   * accept, re-prices the rent at the agreed daily rate and closes the thread.
    */
   static async acceptOffer(userId: string, bookingId: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found");
+    if (!business) throw forbidden("No business found");
 
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: {
-        negotiation: {
-          include: {
-            offers: { orderBy: { createdAt: "desc" }, take: 1 },
-          },
-        },
-      },
-    });
-    if (!booking) throw new Error("Booking not found");
+    const booking = await prisma.bookingRequest.findUnique({ where: { id: bookingId } });
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("Not your booking");
-
-    const neg = booking.negotiation;
-    if (!neg || neg.status !== "OPEN") throw new Error("No open negotiation");
-
-    const latestOffer = neg.offers[0];
-    if (!latestOffer || latestOffer.status !== "PENDING")
-      throw new Error("No pending offer to accept");
-
-    // The acceptor must be the OPPOSITE party of the proposer
+    if (!isSeeker && !isProvider) throw forbidden("Not your booking");
     const callerRole = isSeeker ? "SEEKER" : "PROVIDER";
-    if (latestOffer.proposerRole === callerRole)
-      throw new Error("You cannot accept your own offer");
 
-    return prisma.$transaction(async (tx) => {
-      // Mark offer accepted
-      await tx.negotiationOffer.update({
-        where: { id: latestOffer.id },
-        data: { status: "ACCEPTED" },
+    const loadOffer = async (db: Pick<typeof prisma, "negotiation">) => {
+      const neg = await db.negotiation.findUnique({
+        where: { bookingId },
+        include: { offers: { orderBy: { createdAt: "desc" }, take: 1 } },
       });
+      if (!neg || neg.status !== "OPEN") throw conflict("No open negotiation");
+      const latestOffer = neg.offers[0];
+      if (!latestOffer || latestOffer.status !== "PENDING") throw conflict("No pending offer to accept");
+      // The acceptor must be the OPPOSITE party of the proposer
+      if (latestOffer.proposerRole === callerRole) throw conflict("You cannot accept your own offer");
+      return { neg, latestOffer };
+    };
 
-      // Close negotiation
-      await tx.negotiation.update({
-        where: { id: neg.id },
-        data: { status: "ACCEPTED" },
-      });
+    // Read the offer to learn the agreed rate, then re-validate it under the locks.
+    const agreedRate = (await loadOffer(prisma)).latestOffer.offeredAmountPaise;
 
-      // Recalculate totals based on agreed daily rate
-      const totalDays = booking.totalDays ?? 1;
-      const newRentPaise  = latestOffer.offeredAmountPaise * totalDays;
-      const newTotalPaise = newRentPaise + booking.securityDepositPaise + booking.transportFeePaise;
-
-      // Update booking price + accept
-      const updated = await tx.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          rentAmountPaise:  newRentPaise,
-          totalAmountPaise: newTotalPaise,
-          proposedPrice:    latestOffer.offeredAmountPaise / 100,
-          finalPrice:       latestOffer.offeredAmountPaise / 100,
-          bookingStatus:    "BOOKING_ACCEPTED",
-          status:           "accepted",
-        },
-      });
-
+    return BookingService.acceptBooking(bookingId, booking.resourceId, business, agreedRate, async (tx) => {
+      const { neg, latestOffer } = await loadOffer(tx);
+      if (latestOffer.offeredAmountPaise !== agreedRate) throw conflict("The offer changed; please review it again");
+      await tx.negotiationOffer.update({ where: { id: latestOffer.id }, data: { status: "ACCEPTED" } });
+      await tx.negotiation.update({ where: { id: neg.id }, data: { status: "ACCEPTED" } });
       await BookingService.recordTimelineEvent(
-        bookingId,
-        "NEGOTIATION_ACCEPTED",
-        business.id,
-        isSeeker ? "RENTER" : "OWNER",
+        bookingId, "NEGOTIATION_ACCEPTED", business.id, isSeeker ? "RENTER" : "OWNER",
         "Negotiated price accepted",
-        `${business.name} accepted the offer of ₹${(latestOffer.offeredAmountPaise / 100).toLocaleString()}/day. Booking confirmed at agreed price.`
+        `${business.name} accepted the offer of ₹${(agreedRate / 100).toLocaleString()}/day.`,
+        null, tx
       );
-
-      return updated;
     });
   }
 
@@ -208,20 +184,20 @@ export class NegotiationService {
    */
   static async rejectNegotiation(userId: string, bookingId: string, reason?: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found");
+    if (!business) throw forbidden("No business found");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
       include: { negotiation: true },
     });
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("Not your booking");
+    if (!isSeeker && !isProvider) throw forbidden("Not your booking");
 
     const neg = booking.negotiation;
-    if (!neg || neg.status !== "OPEN") throw new Error("No open negotiation to reject");
+    if (!neg || neg.status !== "OPEN") throw conflict("No open negotiation to reject");
 
     await prisma.$transaction(async (tx) => {
       // Mark latest pending offer rejected

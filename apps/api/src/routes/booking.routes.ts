@@ -18,7 +18,7 @@ router.get("/", BookingController.getBookingRequests);
 router.get("/:id", BookingController.getBookingRequestById);
 
 // ── STATUS TRANSITIONS ────────────────────────────────────────────────
-// Accept, reject, or cancel  (removed "completed" — use owner-accept-return)
+// Accept / reject (owner), cancel (renter before handover, owner after accepting)
 router.patch("/:id/status", BookingController.updateBookingStatus);
 
 // ── RAZORPAY PAYMENT — TWO-STEP ───────────────────────────────────────
@@ -30,11 +30,14 @@ router.post("/:id/pay", BookingController.createPaymentOrder);
 router.post("/:id/pay/verify", BookingController.verifyPayment);
 
 // ── HANDOVER & INSPECTION ─────────────────────────────────────────────
-// Owner marks resource handed over (starts 1-hr renter inspection timer)
+// Owner enters the renter's handover code + condition photos (starts 1-hr renter inspection timer)
 router.post("/:id/handover", BookingController.markHandover);
 
 // Renter receiving inspection (Accept resource or report issue)
 router.post("/:id/renter-inspection", BookingController.renterInspection);
+
+// Owner accepts (full refund) or contests (admin) an issue the renter reported at handover
+router.post("/:id/handover-response", BookingController.ownerHandoverResponse);
 
 // ── RETURN FLOW ───────────────────────────────────────────────────────
 // Renter initiates return with return evidence
@@ -53,8 +56,7 @@ router.post("/:id/damage-claim", BookingController.ownerDamageClaim);
 // Renter responds to damage claim (Accept deduction or dispute)
 router.post("/:id/claim-response", BookingController.renterRespondClaim);
 
-// Customer Care / Admin resolves dispute (requires Admin JWT)
-router.post("/:id/resolve-dispute", BookingController.adminResolveDispute);
+// Admin dispute resolution lives at /api/admin/disputes/:bookingId/resolve (admin token).
 
 // Report non-return (owner — after rental period ends)
 router.post("/:id/non-return", BookingController.reportNonReturn);

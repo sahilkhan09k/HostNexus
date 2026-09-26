@@ -10,6 +10,11 @@ import {
 import { createBookingRequest, makeNegotiationOffer } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
+/** "YYYY-MM-DD" for the user's local calendar day (toISOString would give the UTC day). */
+function localIsoDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -44,8 +49,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   const [tab, setTab] = useState<Tab>("book");
 
   // Shared booking fields
-  const [startDate, setStartDate] = useState(tomorrow.toISOString().split("T")[0]);
-  const [endDate, setEndDate]     = useState(dayAfter.toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState(localIsoDate(tomorrow));
+  const [endDate, setEndDate]     = useState(localIsoDate(dayAfter));
   const [quantity, setQuantity]   = useState(1);
   const [specialRequests, setSpecialRequests] = useState("");
   const [acknowledgedInspection, setAcknowledgedInspection] = useState(false);
@@ -69,7 +74,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   // ── Pricing calculations ─────────────────────────────────────
   const start    = new Date(startDate);
   const end      = new Date(endDate);
-  const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+  // Both dates are inclusive: the 3rd to the 3rd is a one-day rental
+  const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
 
   const listedDailyINR  = (resource.rentAmountPaise ?? 0) / 100;
   const depositINR      = (resource.securityDepositPaise ?? 0) / 100;
@@ -108,8 +114,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       await createBookingRequest({
         resourceId:      resource.id,
         quantity,
-        startDate:       new Date(startDate).toISOString(),
-        endDate:         new Date(endDate).toISOString(),
+        startDate,       // calendar days ("YYYY-MM-DD"), inclusive
+        endDate,
         specialRequests: specialRequests.trim() || undefined,
         transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
         transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
@@ -145,8 +151,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       const booking = await createBookingRequest({
         resourceId:      resource.id,
         quantity,
-        startDate:       new Date(startDate).toISOString(),
-        endDate:         new Date(endDate).toISOString(),
+        startDate,       // calendar days ("YYYY-MM-DD"), inclusive
+        endDate,
         specialRequests: specialRequests.trim() || undefined,
         transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
         transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
@@ -173,8 +179,11 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
     <div className="grid grid-cols-3 gap-3">
       <div>
         <label className="block text-xs font-semibold uppercase text-stone-600 mb-1">Start Date</label>
-        <input type="date" value={startDate} min={new Date().toISOString().split("T")[0]}
-          onChange={e => setStartDate(e.target.value)}
+        <input type="date" value={startDate} min={localIsoDate(new Date())}
+          onChange={e => {
+            setStartDate(e.target.value);
+            if (endDate < e.target.value) setEndDate(e.target.value);
+          }}
           className="w-full rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500" required />
       </div>
       <div>

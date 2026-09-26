@@ -1,5 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import { RagService } from "../services/rag/rag.service.js";
+
+// Inventory answers read listings from the database; use an in-memory one.
+vi.mock("../config/database.js", async () => {
+  const { createFakePrisma } = await import("./helpers/fake-prisma.js");
+  return { prisma: createFakePrisma() };
+});
+
+// Use the built-in answers so these tests don't depend on a live LLM.
+beforeAll(() => {
+  for (const k of ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]) delete process.env[k];
+});
 
 describe("HostNexus RAG Pipeline", () => {
   it("should comprehensively answer damage policy questions with 4-stage chain of custody and escrow details", async () => {
@@ -17,34 +28,15 @@ describe("HostNexus RAG Pipeline", () => {
     expect(res.sources.length).toBeGreaterThan(0);
   });
 
-  it("should match multi-item inventory when user requests '30 chairs, 40 tables on 28th October'", async () => {
+  it("answers an inventory request from listings (none here) instead of inventing matches", async () => {
     const res = await RagService.processQuery({
       message: "I want to order 30 chairs, 40 tables on 28th October",
-      date: "2026-10-28",
     });
 
     expect(res.intent).toBe("listing_inquiry");
-    expect(res.results.length).toBeGreaterThan(0);
-
-    // Verify at least one chair listing and one table listing returned
-    const titles = res.results.map(r => r.title.toLowerCase());
-    const hasChair = titles.some(t => t.includes("chair"));
-    const hasTable = titles.some(t => t.includes("table"));
-
-    expect(hasChair).toBe(true);
-    expect(hasTable).toBe(true);
-
-    // Verify detailed attributes on cards
-    const chairCard = res.results.find(r => r.title.toLowerCase().includes("chair"))!;
-    expect(chairCard.whyChoose).toBeDefined();
-    expect(chairCard.features.length).toBeGreaterThan(0);
-    expect(chairCard.price).toBeDefined();
-    expect(chairCard.match).toBeGreaterThanOrEqual(75);
-
-    // Verify explanation in the markdown reply
-    expect(res.reply).toContain("Chairs");
-    expect(res.reply).toContain("Tables");
-    expect(res.reply).toContain("Why Choose This");
+    expect(res.results).toEqual([]);
+    expect(res.reply).toContain("No chairs are listed");
+    expect(res.reply).toContain("No tables are listed");
   });
 
   it("should handle negotiation questions accurately", async () => {

@@ -14,9 +14,10 @@ declare global {
 
 /**
  * Authentication middleware
- * Verifies JWT token and attaches user ID to request
+ * Verifies the JWT, then checks the account is still VERIFIED (a user rejected
+ * or suspended after signing in is cut off at once), and attaches the user ID.
  */
-export function authenticate(req: Request, res: Response, next: NextFunction): void {
+export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     // Get token from Authorization header
     const authHeader = req.headers.authorization;
@@ -49,6 +50,17 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
     // Verify access token (short-lived, signed with JWT_SECRET)
     const payload = AuthService.verifyToken(token);
+
+    try {
+      await AuthService.assertAccountActive(payload.sub);
+    } catch (statusError) {
+      const e = statusError as { statusCode?: number; code?: string; message?: string };
+      res.status(e.statusCode ?? 403).json({
+        success: false,
+        error: { code: e.code ?? "ACCOUNT_INACTIVE", message: e.message ?? "Account is not active" },
+      });
+      return;
+    }
 
     // Attach user ID to request
     req.userId = payload.sub;

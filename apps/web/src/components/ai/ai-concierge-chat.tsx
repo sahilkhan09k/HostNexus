@@ -10,7 +10,7 @@ import {
   ChevronRight, ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { queryAiConcierge, type AiListingResult } from "@/lib/api-client";
+import { queryAiConcierge, type AiListingResult, type AiConciergeContext } from "@/lib/api-client";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
@@ -137,16 +137,24 @@ function MarkdownRenderer({ content }: { content: string }) {
  * Parses bold **text** and [link text](url) within a line
  */
 function parseInlineMarkdown(text: string) {
-  // Regex matches [label](url) or **bold**
-  const regex = /(\[.*?\]\(.*?\)|\*\*.*?\*\*)/g;
+  // Regex matches [label](url), **bold**, or _italic_ / *italic*
+  const regex = /(\[.*?\]\(.*?\)|\*\*.*?\*\*|(?<![\w*])_[^_]+_(?!\w)|(?<![\w*])\*[^*\s][^*]*\*(?![\w*]))/g;
   const parts = text.split(regex);
 
   return parts.map((part, index) => {
+    if (!part) return null;
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
         <strong key={index} className="font-semibold text-stone-900">
           {part.slice(2, -2)}
         </strong>
+      );
+    }
+    if ((part.startsWith("_") && part.endsWith("_")) || (part.startsWith("*") && part.endsWith("*") && part.length > 2)) {
+      return (
+        <em key={index} className="text-stone-500">
+          {part.slice(1, -1)}
+        </em>
       );
     }
 
@@ -189,6 +197,11 @@ function ResourceResultCard({ result, index }: { result: AiListingResult; index:
               <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold", result.categoryColor)}>
                 {result.category}
               </span>
+              {result.tier === "ALTERNATIVE" && (
+                <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  Alternative
+                </span>
+              )}
               {result.hasPreExistingDamage && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
                   <AlertTriangle className="h-2.5 w-2.5" /> Condition Stamped
@@ -203,23 +216,46 @@ function ResourceResultCard({ result, index }: { result: AiListingResult; index:
             </Link>
             <div className="mt-1 flex items-center gap-1.5 text-xs text-stone-500">
               <MapPin className="h-3 w-3 text-emerald-600 shrink-0" />
-              <span>{result.business} · {result.location}</span>
+              <span>{[result.business, result.location].filter(Boolean).join(" · ")}</span>
             </div>
           </div>
 
-          {/* Match Score Badge */}
-          <div className="shrink-0 text-right rounded-xl bg-emerald-50 px-2.5 py-1.5 border border-emerald-100">
-            <div className="text-sm font-black text-emerald-700">{result.match}%</div>
-            <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-600">match</div>
+          {/* Fit badge: how much of the requested quantity this listing covers (real stock) */}
+          <div
+            className={cn(
+              "shrink-0 text-right rounded-xl px-2.5 py-1.5 border",
+              result.match >= 100 ? "bg-emerald-50 border-emerald-100" : "bg-amber-50 border-amber-200"
+            )}
+          >
+            <div className={cn("text-sm font-black", result.match >= 100 ? "text-emerald-700" : "text-amber-800")}>
+              {result.requestedQuantity
+                ? `${Math.min(result.quantityAvailable, result.requestedQuantity)}/${result.requestedQuantity}`
+                : result.quantityAvailable}
+            </div>
+            <div className={cn("text-[10px] uppercase font-bold tracking-wider", result.match >= 100 ? "text-emerald-600" : "text-amber-700")}>
+              {result.matchedFor}
+            </div>
           </div>
         </div>
 
-        {/* Why choose this callout */}
-        {result.whyChoose && (
+        {/* What this listing covers of the request */}
+        {result.fitLabel && (
           <div className="mt-3 rounded-xl bg-stone-50 p-2.5 text-xs text-stone-600 border border-stone-100 flex items-start gap-2">
             <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
-            <p className="leading-snug">{result.whyChoose}</p>
+            <p className="leading-snug">{result.fitLabel}</p>
           </div>
+        )}
+
+        {/* Every way this listing misses the request */}
+        {result.caveats && result.caveats.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {result.caveats.map((c, cIdx) => (
+              <li key={cIdx} className="flex items-start gap-1.5 text-xs font-medium text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+                {c}
+              </li>
+            ))}
+          </ul>
         )}
 
         {/* Features badges */}
@@ -240,11 +276,15 @@ function ResourceResultCard({ result, index }: { result: AiListingResult; index:
               <Users className="h-3 w-3 text-stone-400" />
               {result.capacity}
             </span>
-            <span className="flex items-center gap-1">
-              <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-              <span className="font-semibold text-stone-700">{result.rating}</span>
-              <span className="text-[10px] text-stone-400">({result.reviewCount})</span>
-            </span>
+            {result.rating !== null ? (
+              <span className="flex items-center gap-1">
+                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                <span className="font-semibold text-stone-700">{result.rating}</span>
+                <span className="text-[10px] text-stone-400">({result.reviewCount})</span>
+              </span>
+            ) : (
+              <span className="text-[11px] text-stone-400">No reviews yet</span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -283,6 +323,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  // What the concierge remembers about this conversation (last search, listings shown)
+  const conversationRef = useRef<AiConciergeContext | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -305,17 +347,19 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
     setIsLoading(true);
 
     try {
-      // Build conversation history for context
-      const history = messages.slice(-6).map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      // The conversation so far (without the greeting), so follow-up questions make sense
+      const history = messages
+        .filter((m) => m.id !== "welcome")
+        .slice(-8)
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-      // Call the real Express RAG backend
+      // Call the real Express RAG backend, echoing back what it remembered last turn
       const response = await queryAiConcierge({
         message: trimmed,
         history,
+        context: conversationRef.current,
       });
+      conversationRef.current = response.context;
 
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -347,6 +391,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
   };
 
   const clearChat = () => {
+    conversationRef.current = undefined; // a new conversation forgets the previous search
     setMessages([
       {
         id: "welcome",
@@ -491,27 +536,52 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
                       )}
                     </div>
 
-                    {/* Matched Listings (if present) */}
-                    {msg.results && msg.results.length > 0 && (
-                      <div className="mt-4 w-full space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-bold uppercase tracking-wider text-stone-500">
-                            Available Inventory ({msg.results.length} Matches Found)
-                          </p>
-                          <Link
-                            href="/marketplace"
-                            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1"
-                          >
-                            Explore Marketplace <ChevronRight className="h-3 w-3" />
-                          </Link>
-                        </div>
-                        <div className="space-y-3">
-                          {msg.results.map((r, i) => (
-                            <ResourceResultCard key={r.id} result={r} index={i} />
+                    {/* Listings: exact matches first, then clearly labelled alternatives */}
+                    {msg.results && msg.results.length > 0 && (() => {
+                      const matches = msg.results.filter((r) => r.tier !== "ALTERNATIVE");
+                      const alternatives = msg.results.filter((r) => r.tier === "ALTERNATIVE");
+                      const groups = [
+                        { key: "match", title: `Matching Listings (${matches.length})`, note: "", items: matches },
+                        {
+                          key: "alt",
+                          title: `Alternatives (${alternatives.length})`,
+                          note: "Not an exact match for what you asked. See why on each card.",
+                          items: alternatives,
+                        },
+                      ].filter((g) => g.items.length > 0);
+                      return (
+                        <div className="mt-4 w-full space-y-4">
+                          {groups.map((g, gIdx) => (
+                            <div key={g.key} className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className={cn(
+                                    "text-xs font-bold uppercase tracking-wider",
+                                    g.key === "alt" ? "text-amber-700" : "text-stone-500"
+                                  )}>
+                                    {g.title}
+                                  </p>
+                                  {g.note && <p className="text-[11px] text-stone-400">{g.note}</p>}
+                                </div>
+                                {gIdx === 0 && (
+                                  <Link
+                                    href="/marketplace"
+                                    className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1"
+                                  >
+                                    Explore Marketplace <ChevronRight className="h-3 w-3" />
+                                  </Link>
+                                )}
+                              </div>
+                              <div className="space-y-3">
+                                {g.items.map((r, i) => (
+                                  <ResourceResultCard key={r.id} result={r} index={i} />
+                                ))}
+                              </div>
+                            </div>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Policy Sources Cited */}
                     {msg.sources && msg.sources.length > 0 && (
@@ -547,7 +617,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
                       </div>
                     )}
 
-                    <p className="mt-1.5 px-1 text-[10px] text-stone-400">
+                    {/* The welcome message's time is rendered on the server too; its locale format differs */}
+                    <p className="mt-1.5 px-1 text-[10px] text-stone-400" suppressHydrationWarning>
                       {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </p>
                   </div>

@@ -2,6 +2,8 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
+import { TERMINAL_BOOKING_STATUSES } from "./booking-rules.js";
+import { badRequest, conflict, notFound } from "../utils/http-error.js";
 
 const ADMIN_TOKEN_EXPIRY = "8h";
 
@@ -67,7 +69,81 @@ export class AdminService {
       orderBy: { createdAt: "desc" },
     });
 
-    return users;
+    // Open bookings per user, so the panel can warn before suspending someone mid-rental.
+    const businessIds = users.flatMap((u) => u.businesses.map((b) => b.id));
+    const openCounts = new Map<string, number>();
+    if (businessIds.length) {
+      const open = await prisma.bookingRequest.findMany({
+        where: {
+          bookingStatus: { notIn: TERMINAL_BOOKING_STATUSES },
+          OR: [{ seekerId: { in: businessIds } }, { providerId: { in: businessIds } }],
+        },
+        select: { seekerId: true, providerId: true },
+      });
+      for (const b of open) {
+        for (const id of new Set([b.seekerId, b.providerId])) openCounts.set(id, (openCounts.get(id) ?? 0) + 1);
+      }
+    }
+
+    return users.map((u) => ({
+      ...u,
+      openBookings: u.businesses.reduce((n, b) => n + (openCounts.get(b.id) ?? 0), 0),
+    }));
+  }
+
+  /**
+   * Suspend a verified user: they are signed out on their next request and their
+   * listings disappear from the marketplace. Open bookings are left for admin
+   * to handle through the dispute console.
+   */
+  static async suspendUser(userId: string, reason: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw notFound("User not found");
+    if (user.verificationStatus !== "VERIFIED") throw conflict("Only verified users can be suspended");
+    return prisma.user.update({
+      where: { id: userId },
+      data: { verificationStatus: "SUSPENDED", verificationNotes: reason },
+    });
+  }
+
+  /** Lift a suspension. */
+  static async reinstateUser(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw notFound("User not found");
+    if (user.verificationStatus !== "SUSPENDED") throw conflict("Only suspended users can be reinstated");
+    return prisma.user.update({
+      where: { id: userId },
+      data: { verificationStatus: "VERIFIED", verificationNotes: null },
+    });
+  }
+
+  // ── Dispute console ───────────────────────────────────────
+
+  /** Disputed bookings with everything admin needs to decide them. */
+  static async listDisputes(status: "OPEN" | "ESCALATED" | "RESOLVED" | "ALL" = "ALL") {
+    const statusFilter = status === "ALL" ? {} : { status };
+    if (!["OPEN", "ESCALATED", "RESOLVED", "ALL"].includes(status)) throw badRequest("Invalid dispute status filter");
+
+    const disputes = await prisma.dispute.findMany({
+      where: statusFilter,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        damageClaim: true,
+        booking: {
+          include: {
+            resource: { select: { id: true, name: true, resourceType: true, photos: true } },
+            seeker:   { select: { id: true, name: true, city: true } },
+            provider: { select: { id: true, name: true, city: true } },
+            inspections: { orderBy: { createdAt: "asc" } },
+            evidence:    { orderBy: { createdAt: "asc" } },
+            timelineEvents: { orderBy: { createdAt: "asc" } },
+            paymentTransactions: { orderBy: { createdAt: "asc" } },
+          },
+        },
+      },
+    });
+    return disputes.map(({ booking: { handoverCode: _secret, ...booking }, ...d }) => ({ ...d, booking }));
   }
 
   /** Approve a user — flips verificationStatus to VERIFIED */
@@ -90,13 +166,17 @@ export class AdminService {
 
   /** Dashboard summary counts */
   static async getSummary() {
-    const [pending, verified, rejected, totalResources, totalBookings] = await Promise.all([
+    const [pending, verified, rejected, suspended, totalResources, totalBookings, openDisputes, pendingPayouts, failedRefunds] = await Promise.all([
       prisma.user.count({ where: { verificationStatus: "PENDING" } }),
       prisma.user.count({ where: { verificationStatus: "VERIFIED" } }),
       prisma.user.count({ where: { verificationStatus: "REJECTED" } }),
-      prisma.resource.count(),
+      prisma.user.count({ where: { verificationStatus: "SUSPENDED" } }),
+      prisma.resource.count({ where: { deletedAt: null } }),
       prisma.bookingRequest.count(),
+      prisma.dispute.count({ where: { status: { in: ["OPEN", "ESCALATED"] } } }),
+      prisma.paymentTransaction.count({ where: { direction: "TO_OWNER", status: "PENDING" } }),
+      prisma.paymentTransaction.count({ where: { direction: "TO_RENTER", status: "FAILED" } }),
     ]);
-    return { pending, verified, rejected, totalResources, totalBookings };
+    return { pending, verified, rejected, suspended, totalResources, totalBookings, openDisputes, pendingPayouts, failedRefunds };
   }
 }

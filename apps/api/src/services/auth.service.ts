@@ -179,8 +179,39 @@ export class AuthService {
       throw err;
     }
 
+    if (user.verificationStatus !== "VERIFIED") throw this.inactiveAccountError(user.verificationStatus);
+
     const tokens = this.generateTokenPair(user.id);
     return { user: this.sanitizeUser(user), token: tokens.accessToken, ...tokens };
+  }
+
+  /**
+   * Throws a 403 unless the account is still VERIFIED. Checked on every
+   * authenticated request and every token refresh, so a user who is rejected
+   * or suspended after signing in loses access immediately.
+   */
+  static async assertAccountActive(userId: string): Promise<void> {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { verificationStatus: true } });
+    if (!user) {
+      const err = new Error("Account not found");
+      (err as any).code = "ACCOUNT_NOT_FOUND";
+      (err as any).statusCode = 401;
+      throw err;
+    }
+    if (user.verificationStatus !== "VERIFIED") throw this.inactiveAccountError(user.verificationStatus);
+  }
+
+  private static inactiveAccountError(status: string): Error {
+    const messages: Record<string, [string, string]> = {
+      SUSPENDED: ["ACCOUNT_SUSPENDED", "Your account has been suspended. Please contact support."],
+      REJECTED:  ["ACCOUNT_REJECTED", "Your account verification was rejected. Please contact support."],
+      PENDING:   ["ACCOUNT_PENDING", "Your account is pending verification."],
+    };
+    const [code, message] = messages[status] ?? ["ACCOUNT_INACTIVE", "Your account is not active."];
+    const err = new Error(message);
+    (err as any).code = code;
+    (err as any).statusCode = 403;
+    return err;
   }
 
   static async getUserById(userId: string): Promise<SafeUser | null> {

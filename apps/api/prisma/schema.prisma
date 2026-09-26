@@ -16,9 +16,10 @@ model User {
   passwordHash String
 
   // KYC & verification
-  // verificationStatus: PENDING | VERIFIED | REJECTED
+  // verificationStatus: PENDING | VERIFIED | REJECTED | SUSPENDED
+  // Only VERIFIED users can sign in or call the API; SUSPENDED users' listings are hidden.
   verificationStatus String   @default("PENDING")
-  verificationNotes  String?  // admin rejection reason
+  verificationNotes  String?  // admin rejection / suspension reason
 
   // KYC documents (URLs to uploaded files)
   gstCertificateUrl   String?  // GST Certificate — primary B2B identity doc
@@ -100,11 +101,15 @@ model Resource {
   transportAvailable      Boolean @default(false)
   transportRatePerKmPaise Int     @default(0)
 
+  // Soft delete: a deleted listing is hidden everywhere but its booking history is kept.
+  deletedAt DateTime?
+
   bookingRequests    BookingRequest[]
   availabilityWindows AvailabilityWindow[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@index([deletedAt])
   @@index([businessId])
   @@index([resourceType])
   @@index([status])
@@ -131,21 +136,25 @@ model AvailabilityWindow {
 model BookingRequest {
   id              String   @id @default(cuid())
   seekerId        String
-  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Cascade)
+  // Restrict (not Cascade): the booking ledger must never disappear because a
+  // listing or business was deleted. Listings are soft-deleted instead.
+  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Restrict)
   providerId      String
-  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Restrict)
   resourceId      String
-  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
-  
+  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+
   quantity        Int
+  // Both dates are calendar days (stored at 00:00 UTC) and INCLUSIVE:
+  // start = end is a one-day booking, totalDays = end - start + 1.
   startDate       DateTime
   endDate         DateTime
   totalDays       Int?
   specialRequests String?
-  
+
   // Dual State Machine (MVP v2)
-  bookingStatus   String   @default("BOOKING_REQUESTED") // BOOKING_REQUESTED, BOOKING_ACCEPTED, HANDOVER_INSPECTION, ACTIVE, RETURN_INITIATED, RETURN_NOT_RECEIVED, OWNER_INSPECTION, DISPUTED, NON_RETURNED, COMPLETED, CANCELLED
-  financialStatus String   @default("PENDING_PAYMENT")  // PENDING_PAYMENT, FUNDS_HELD, RENT_RELEASED, DEPOSIT_HELD, DEPOSIT_REFUNDED, DEPOSIT_TO_OWNER, PARTIAL_SETTLEMENT
+  bookingStatus   String   @default("BOOKING_REQUESTED") // BOOKING_REQUESTED, BOOKING_ACCEPTED, HANDOVER_INSPECTION, ACTIVE, RETURN_INITIATED, OWNER_INSPECTION, DISPUTED, COMPLETED, CANCELLED
+  financialStatus String   @default("PENDING_PAYMENT")  // PENDING_PAYMENT, NO_PAYMENT, FUNDS_HELD, RENT_RELEASED, DEPOSIT_REFUNDED, DEPOSIT_TO_OWNER, PARTIAL_SETTLEMENT, FULLY_REFUNDED
   
   // Legacy status string bridge
   status          String   @default("pending")
@@ -181,6 +190,29 @@ model BookingRequest {
   ownerInspectionDeadline  DateTime? // +2 hours from ownerReceivedAt
   completedAt              DateTime?
   nonReturnReportedAt      DateTime?
+  acceptedAt               DateTime?
+  paymentDeadline          DateTime? // unpaid accepted bookings auto-cancel after this
+  fundedAt                 DateTime?
+  handoverDeadline         DateTime? // funded bookings not handed over by this are an owner no-show
+  ownerReceiptDeadline     DateTime? // +24h from returnInitiatedAt; receipt auto-confirmed after this
+  cancelledAt              DateTime?
+  cancelledBy              String?   // RENTER | OWNER | SYSTEM
+
+  // Razorpay binding — the escrow can only be funded by a captured payment of
+  // this exact order and amount, and one payment can never fund two bookings.
+  razorpayOrderId          String?
+  razorpayOrderAmountPaise Int?
+  razorpayPaymentId        String?   @unique
+
+  // Handover code: generated when escrow is funded, shown only to the renter.
+  // The owner must enter it at physical handover to start the inspection window.
+  handoverCode             String?
+  handoverCodeAttempts     Int       @default(0)
+
+  // Unit counts at each custody step
+  receivedQuantity         Int?      // renter, at handover
+  returnedQuantity         Int?      // renter, at return
+  ownerReceivedQuantity    Int?      // owner, at return receipt
 
   // Relations
   inspections         Inspection[]
@@ -263,10 +295,20 @@ model Dispute {
   booking               BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   damageClaimId         String?
   damageClaim           DamageClaim?   @relation(fields: [damageClaimId], references: [id], onDelete: SetNull)
-  status                String         @default("OPEN") // OPEN, RESOLVED
+  // HANDOVER_ISSUE: raised by the renter at handover; the whole payment is at stake, the owner responds.
+  // RETURN_CLAIM:   raised by the owner (damage / missing / fake return / non-return); only the deposit is at stake, the renter responds.
+  kind                  String         @default("RETURN_CLAIM")
+  raisedByRole          String         @default("OWNER") // OWNER | RENTER | SYSTEM
+  // OPEN = waiting for the other party, ESCALATED = waiting for admin, RESOLVED
+  status                String         @default("OPEN")
+  responseDeadline      DateTime?      // other party must respond by this, else auto-settled
+  escalatedAt           DateTime?
   renterResponse        String?
   renterReason          String?        // PRE_EXISTING_DAMAGE, NOT_CAUSED_BY_RENTER, AFTER_RETURN, NORMAL_WEAR_TEAR, INCORRECT_AMOUNT, OTHER
-  adminDecision         String?        // REFUND_RENTER, PAY_OWNER, PARTIAL_SETTLEMENT, REJECT_CLAIM
+  ownerResponse         String?
+  // RETURN_CLAIM: REFUND_RENTER, PAY_OWNER, PARTIAL_SETTLEMENT, REJECT_CLAIM
+  // HANDOVER_ISSUE: FULL_REFUND, REJECT_ISSUE, PARTIAL_REFUND
+  adminDecision         String?
   resolutionAmountPaise Int?
   resolutionNotes       String?
   resolvedById          String?
@@ -281,13 +323,27 @@ model PaymentTransaction {
   id                String         @id @default(cuid())
   bookingId         String
   booking           BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  type              String         // ESCROW_DEPOSIT, RENT_PAYOUT, DEPOSIT_REFUND, DAMAGE_PAYOUT, PARTIAL_SETTLEMENT
+  // ESCROW_DEPOSIT (IN) · FULL_REFUND, RENT_REFUND, DEPOSIT_REFUND (TO_RENTER) · RENT_PAYOUT, DAMAGE_PAYOUT (TO_OWNER)
+  type              String
+  direction         String         @default("IN") // IN | TO_RENTER | TO_OWNER
   amountPaise       Int
-  status            String         @default("COMPLETED") // PENDING, COMPLETED, FAILED
-  providerReference String?
+  // Refunds to the renter go through the Razorpay Refunds API: PENDING → COMPLETED | FAILED (retried).
+  // Owner payouts sit PENDING until an admin settles them and records the bank UTR.
+  status            String         @default("PENDING") // PENDING, COMPLETED, FAILED
+  // Idempotency key for this ledger line (e.g. RENT_PAYOUT_<bookingId>); the
+  // Razorpay payment id for ESCROW_DEPOSIT. Unique so no line can be written twice.
+  providerReference String?        @unique
+  razorpayRefundId  String?
+  utrReference      String?
+  failureReason     String?
+  attempts          Int            @default(0)
+  processedAt       DateTime?
+  processedById     String?        // admin who settled an owner payout
   createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([bookingId])
+  @@index([status, direction])
   @@map("payment_transactions")
 }
 

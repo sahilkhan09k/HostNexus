@@ -1,5 +1,12 @@
+import { prisma } from "../../config/database.js";
 import { VectorStoreService } from "./vector-store.js";
-import { ListingRetriever } from "./listing-retriever.js";
+import { ListingRetriever, type InventoryAnswer } from "./listing-retriever.js";
+import {
+  resolveFollowUp,
+  toSearchContext,
+  fromSearchContext,
+  type ConciergeContext,
+} from "./conversation.js";
 import type { 
   RagQueryInput, 
   RagResponse, 
@@ -14,32 +21,78 @@ export class RagService {
    */
   static async processQuery(input: RagQueryInput): Promise<RagResponse> {
     const userMessage = input.message.trim();
+    const ctx = input.context;
 
-    // 1. Detect query intent
+    // 1. Detect the message's stand-alone intent
     const intent = this.classifyIntent(userMessage);
 
-    // 2. Semantic Vector Retrieval over platform policy & rules knowledge documents
-    const retrievedDocs = await this.retrieveKnowledgeChunks(userMessage);
+    // 2. Resolve it against the conversation so far: a refinement of the last
+    //    search ("what about Mumbai?"), a new item for the same event ("and 40
+    //    tables?"), or a question about listings already shown ("is the first
+    //    one free on 30th?").
+    const titles = await this.listingTitles(ctx?.resultIds);
+    const followUp = resolveFollowUp(userMessage, ctx, intent, titles);
 
-    // 3. Semantic Vector Retrieval over verified marketplace listings
-    let matchingListings: ResourceResultCard[] = [];
-    if (intent === "listing_inquiry" || this.shouldIncludeListings(userMessage)) {
-      matchingListings = await ListingRetriever.retrieveMatchingResources(userMessage, input.date);
+    // Inventory is answered straight from live listings with strict item
+    // matching — never by an LLM — so stock, prices and "not available" are facts.
+    if (followUp.kind === "SEARCH") {
+      const preface =
+        followUp.changed.length > 0 ? `Same search as before, ${followUp.changed.join(", ")}.`
+        : followUp.carried.length > 0 ? `Using your earlier details: ${followUp.carried.join(" · ")}.`
+        : undefined;
+      const answer = await ListingRetriever.answerRequest(followUp.request, { dateOverride: input.date, preface });
+      return this.inventoryResponse(answer, "listing_inquiry", userMessage, {
+        search: answer.request.requirements.length > 0 ? toSearchContext(answer.request) : ctx?.search,
+        resultIds: answer.results.map((r) => r.id),
+      });
     }
+
+    if (followUp.kind === "ABOUT_RESULTS") {
+      const search = ctx?.search ? fromSearchContext(ctx.search) : undefined;
+      const answer = await ListingRetriever.answerAboutListings(followUp.targetIds, followUp.question, search, {
+        assumed: followUp.assumed,
+      });
+      // Keep the original search and result list so "the second one" still means the same thing;
+      // remember the full question so "and the third one?" can repeat it.
+      return this.inventoryResponse(answer, "listing_inquiry", followUp.question, {
+        search: ctx?.search,
+        resultIds: ctx?.resultIds,
+      });
+    }
+
+    // A policy follow-up ("and who decides?") continues the previous topic
+    const isPolicyFollowUp =
+      intent === "policy_question" &&
+      !!ctx?.lastIntent && ctx.lastIntent !== "listing_inquiry" &&
+      this.looksLikeFollowUp(userMessage);
+    const policyIntent: QueryIntent = isPolicyFollowUp ? ctx!.lastIntent! : intent;
+    const retrievalQuery = isPolicyFollowUp && ctx?.lastUserMessage ? `${ctx.lastUserMessage} ${userMessage}` : userMessage;
+    const nextContext: ConciergeContext = {
+      v: 1,
+      lastIntent: policyIntent,
+      lastUserMessage: isPolicyFollowUp && ctx?.lastUserMessage ? ctx.lastUserMessage : userMessage,
+      search: ctx?.search,
+      resultIds: ctx?.resultIds,
+    };
+
+    // 3. Semantic Vector Retrieval over platform policy & rules knowledge documents
+    const retrievedDocs = await this.retrieveKnowledgeChunks(retrievalQuery);
+    const matchingListings: ResourceResultCard[] = [];
 
     // 4. Try Groq (priority) or other external LLMs if API keys exist
     const hasExternalKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
     if (hasExternalKey) {
       try {
-        const llmResponse = await this.generateWithExternalLlm(userMessage, retrievedDocs, matchingListings, input.history);
+        const llmResponse = await this.generateWithExternalLlm(userMessage, retrievedDocs, input.history);
         if (llmResponse) {
           return {
             reply: llmResponse,
             results: matchingListings,
-            intent,
+            intent: policyIntent,
             sources: this.extractSources(retrievedDocs, matchingListings),
-            suggestedFollowUps: this.generateFollowUps(intent, userMessage, matchingListings),
+            suggestedFollowUps: this.generateFollowUps(policyIntent, userMessage, matchingListings),
             referencedPolicies: retrievedDocs.map(d => d.document.section),
+            context: nextContext,
           };
         }
       } catch (err) {
@@ -48,65 +101,120 @@ export class RagService {
     }
 
     // 5. High-fidelity built-in RAG synthesis engine (ensures 100% reliability with zero external dependencies)
-    const reply = this.synthesizeRagResponse(userMessage, intent, retrievedDocs, matchingListings, input);
+    const reply = this.synthesizeRagResponse(policyIntent, retrievedDocs);
 
     return {
       reply,
       results: matchingListings,
-      intent,
+      intent: policyIntent,
       sources: this.extractSources(retrievedDocs, matchingListings),
-      suggestedFollowUps: this.generateFollowUps(intent, userMessage, matchingListings),
+      suggestedFollowUps: this.generateFollowUps(policyIntent, userMessage, matchingListings),
       referencedPolicies: retrievedDocs.map(d => d.document.section),
+      context: nextContext,
     };
   }
 
-  /**
-   * Classify user intent
-   */
-  private static classifyIntent(query: string): QueryIntent {
-    const lower = query.toLowerCase();
+  private static inventoryResponse(
+    answer: InventoryAnswer,
+    intent: QueryIntent,
+    userMessage: string,
+    memory: Pick<ConciergeContext, "search" | "resultIds">
+  ): RagResponse {
+    return {
+      reply: answer.reply,
+      results: answer.results,
+      intent,
+      sources: answer.results.map((l) => `Listing: ${l.title}${l.business ? ` (${l.business})` : ""}`),
+      suggestedFollowUps: answer.outcomes.length > 0 ? this.inventoryFollowUps(answer) : this.aboutFollowUps(answer),
+      referencedPolicies: [],
+      context: { v: 1, lastIntent: intent, lastUserMessage: userMessage, ...memory },
+    };
+  }
 
-    if (
-      lower.includes("damage") || lower.includes("damaged") || lower.includes("broken") ||
-      lower.includes("scratch") || lower.includes("loss") || lower.includes("claim") ||
-      lower.includes("ruin") || lower.includes("breakage") || lower.includes("dispute")
-    ) {
+  private static aboutFollowUps(answer: InventoryAnswer): string[] {
+    const ups = ["Does the owner deliver?", "How much is the deposit for it?"];
+    if (answer.results.length > 0) ups.unshift(`Is the first one available on ${answer.date ? "another date" : "28th October"}?`);
+    return ups.slice(0, 3);
+  }
+
+  /** Names of listings shown earlier, so "is Royal Banquets free on 30th?" can be matched by name. */
+  private static async listingTitles(ids: string[] | undefined): Promise<Map<string, string>> {
+    if (!ids || ids.length === 0) return new Map();
+    try {
+      const rows = await prisma.resource.findMany({ where: { id: { in: ids.slice(0, 20) } }, select: { id: true, name: true } });
+      return new Map(rows.map((r) => [r.id, r.name]));
+    } catch {
+      return new Map();
+    }
+  }
+
+  /** Short or pronoun-led messages continue the previous policy topic ("and who decides?", "what about the deposit?"). */
+  private static looksLikeFollowUp(message: string): boolean {
+    const lower = message.toLowerCase().trim();
+    return (
+      lower.split(/\s+/).length <= 7 ||
+      /^(and|but|so|also|then|what about|how about|what if|who|when|after that|is that|does that|can i|what happens then)\b/.test(lower) ||
+      /\b(it|that|this|they|them|those)\b/.test(lower)
+    );
+  }
+
+  /**
+   * Classify user intent. Whole-word matching only: substring checks made
+   * "available" look like "av" and "business" look like "bus".
+   */
+  static classifyIntent(query: string): QueryIntent {
+    const lower = query.toLowerCase();
+    const has = (re: RegExp) => re.test(lower);
+
+    if (has(/\b(damage[sd]?|damaging|broken|break(?:age|s)?|scratch(?:es|ed)?|loss|lost|claims?|ruin(?:ed)?|disputes?)\b/)) {
       return "damage_inquiry";
     }
-
-    if (
-      lower.includes("negotiate") || lower.includes("bargain") || lower.includes("counter offer") ||
-      lower.includes("discount") || lower.includes("lower price")
-    ) {
+    if (has(/\b(negotiat\w*|bargain\w*|counter[- ]?offers?|discounts?|lower price)\b/)) {
       return "negotiation_inquiry";
     }
-
-    if (
-      lower.includes("escrow") || lower.includes("razorpay") || lower.includes("deposit refund") ||
-      lower.includes("payment safe") || lower.includes("how payment works")
-    ) {
+    const namesItem = ListingRetriever.mentionsCatalogItem(lower);
+    if (!namesItem && has(/\b(escrow|razorpay|refunds?|payments?|pay|deposit)\b/)) {
       return "payment_escrow_inquiry";
     }
 
-    if (
-      lower.includes("order") || lower.includes("chair") || lower.includes("table") ||
-      lower.includes("hall") || lower.includes("banquet") || lower.includes("kitchen") ||
-      lower.includes("av") || lower.includes("rent") || lower.includes("book") ||
-      lower.includes("find") || lower.includes("pax") || lower.includes("need")
-    ) {
+    // Names a rentable item, or asks to rent / order something (but isn't a how-to question)
+    if (namesItem) return "listing_inquiry";
+    const isHowTo = /^\s*(how|what|why|when|where|who|is|are|does|do|can|could|should|explain)\b/.test(lower);
+    if (!isHowTo && has(/\b(order|rent|hire|book|need|want|looking for|find|require|arrange)\b/)) {
       return "listing_inquiry";
     }
 
     return "policy_question";
   }
 
-  private static shouldIncludeListings(query: string): boolean {
-    const lower = query.toLowerCase();
-    const inventoryTerms = [
-      "chair", "table", "banquet", "hall", "kitchen", "av", "catering", 
-      "tent", "van", "pax", "order", "rent", "furniture", "seating", "venue"
-    ];
-    return inventoryTerms.some(term => lower.includes(term));
+  /**
+   * Follow-ups that are real searches built from what was asked, so clicking
+   * one widens the search in the direction that actually has results.
+   */
+  private static inventoryFollowUps(answer: InventoryAnswer): string[] {
+    const ups: string[] = [];
+    const first = answer.outcomes.find((o) => o.cards.length === 0) ?? answer.outcomes[0];
+    const req = answer.request;
+    if (first) {
+      const r = first.requirement;
+      const item = r.venue ? `${r.singular}${req.guests ? ` for ${req.guests} guests` : ""}` : r.quantity ? `${r.quantity} ${r.plural}` : r.plural;
+      if (first.cards.length === 0) {
+        // Point at a city that has one, if the alternatives show one
+        const otherCity = first.alternatives
+          .flatMap((a) => a.caveats)
+          .map((c) => c.match(/— in (.+)$/)?.[1] ?? c.match(/\(([^)]+)\)$/)?.[1])
+          .find(Boolean);
+        if (req.location && otherCity) ups.push(`Find a ${item} in ${otherCity}`);
+        else if (req.location) ups.push(`Find a ${item} anywhere`);
+        const budgetBlocked = first.gaps.some((g) => g.includes(" within ")) ||
+          first.alternatives.some((a) => a.caveats.some((c) => c.startsWith("Over your")));
+        if (req.budget && budgetBlocked) ups.push(`Find a ${item}${req.location ? ` in ${req.location.label}` : ""} with no budget limit`);
+      }
+    }
+    if (answer.outcomes.some((o) => o.cards.length > 0)) ups.push("Can I negotiate the price for bulk orders?");
+    ups.push("How does the escrow payment work?");
+    ups.push("What happens if items get damaged during rental?");
+    return [...new Set(ups)].slice(0, 3);
   }
 
   /**
@@ -129,13 +237,7 @@ export class RagService {
   /**
    * Built-in RAG Synthesis Engine: generates high-fidelity, nuanced answers
    */
-  private static synthesizeRagResponse(
-    query: string,
-    intent: QueryIntent,
-    chunks: RetrievedChunk[],
-    listings: ResourceResultCard[],
-    input: RagQueryInput
-  ): string {
+  private static synthesizeRagResponse(intent: QueryIntent, chunks: RetrievedChunk[]): string {
     // ─── Scenario 1: DAMAGE / CLAIM / DISPUTE INQUIRY ───────────────────────
     if (intent === "damage_inquiry") {
       return (
@@ -156,43 +258,6 @@ export class RagService {
         `  - **Partial Settlement**: If shared liability is determined.\n\n` +
         `> **Peace of Mind Guarantee**: All security deposits are held in RBI-compliant escrow until inspection sign-off, ensuring 100% financial protection.`
       );
-    }
-
-    // ─── Scenario 2: MULTI-ITEM OR SPECIFIC LISTING ORDER ───────────────────
-    if (intent === "listing_inquiry" && listings.length > 0) {
-      const parsedReqs = ListingRetriever.parseUserRequirements(query);
-      const chairReq = parsedReqs.find(r => r.itemType === "chair");
-      const tableReq = parsedReqs.find(r => r.itemType === "table");
-
-      let responseText = `### 🎯 Available Matches for Your Request\n\n`;
-
-      if (chairReq && tableReq) {
-        responseText += `I've analyzed our live verified vector database and found ideal options to fulfill your order for **${chairReq.quantity || 30} Chairs** and **${tableReq.quantity || 40} Tables**`;
-        if (input.date) responseText += ` on **${input.date}**`;
-        responseText += `:\n\n`;
-      } else {
-        responseText += `I searched our live verified hospitality vector database and matched the following top listings for your requirements:\n\n`;
-      }
-
-      listings.forEach((item, index) => {
-        responseText += `#### ${index + 1}. [${item.title}](/marketplace/${item.id}) — *Hosted by ${item.business}*\n`;
-        responseText += `* **Pricing**: **${item.price}** (Security Deposit: ${item.securityDeposit})\n`;
-        responseText += `* **Capacity / Stock**: ${item.capacity} | **Location**: ${item.location}\n`;
-        responseText += `* **Rating**: ⭐ **${item.rating}** (${item.reviewCount} verified reviews)\n`;
-        responseText += `* **Why Choose This**: ${item.whyChoose}\n`;
-        if (item.features && item.features.length > 0) {
-          responseText += `* **Key Features**: ${item.features.join(" • ")}\n`;
-        }
-        responseText += `\n`;
-      });
-
-      responseText += `#### 💡 How to Proceed with this Order:\n`;
-      responseText += `1. **Click 'Book'** on the listing cards below to view the full inventory profile, photos, and calendar.\n`;
-      responseText += `2. **Submit a Booking Request**: Specify your dates and exact quantities needed.\n`;
-      responseText += `3. **Negotiate or Pay Escrow**: Once the owner accepts, you can propose a bulk discount via in-app negotiation or fund the Razorpay escrow directly to lock in your reservation.\n`;
-      responseText += `4. **Protected Handover**: You will receive a 1-hour inspection window at delivery with photos verified against the owner's pre-existing disclosure.`;
-
-      return responseText;
     }
 
     // ─── Scenario 3: NEGOTIATION INQUIRY ────────────────────────────────────
@@ -246,30 +311,30 @@ export class RagService {
   private static async generateWithExternalLlm(
     query: string,
     chunks: RetrievedChunk[],
-    listings: ResourceResultCard[],
-    _history?: Array<{ role: string; content: string }>
+    history?: Array<{ role: string; content: string }>
   ): Promise<string | null> {
+    // The last few turns, so "and what about the deposit?" is understood.
+    // Assistant turns are trimmed; listing cards aren't part of the text anyway.
+    const priorTurns = (history ?? [])
+      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
+      .slice(-8)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content.slice(0, m.role === "assistant" ? 1200 : 600) }));
     const knowledgeContext = chunks
       .map(c => `[DOCUMENT: ${c.document.title} (${c.document.section})]\n${c.document.content}\nRules: ${c.document.rulesSummary.join("; ")}`)
       .join("\n\n");
 
-    const listingsContext = listings
-      .map((l, i) => `[LISTING ${i + 1}: ${l.title} (ID: ${l.id})]\nBusiness: ${l.business} | Location: ${l.location}\nPrice: ${l.price} | Security Deposit: ${l.securityDeposit}\nStock/Capacity: ${l.capacity} | Rating: ${l.rating}★\nWhy Choose: ${l.whyChoose}\nFeatures: ${l.features.join(", ")}`)
-      .join("\n\n");
-
     const systemPrompt = `You are the HostNexus AI Concierge, the official intelligent assistant for HostNexus (a verified B2B hospitality resource-sharing marketplace in India).
 You provide thorough, professional, empathetic, and clear answers to users regarding:
-1. Equipment & venue listings available on HostNexus (furniture, banquet halls, kitchens, AV, etc.). Explain why they should choose specific listings and highlight features.
-2. Platform rules, inspection windows (1-hour receiving inspection, 2-hour owner return inspection), damage claims, security deposit escrow, and dispute arbitration.
-3. Pricing, bulk negotiation, and KYC verification.
+1. Platform rules, inspection windows (1-hour receiving inspection, 2-hour owner return inspection), damage claims, security deposit escrow, and dispute arbitration.
+2. Pricing, bulk negotiation, and KYC verification.
 
-Strictly ground your answer in the provided Knowledge Documents and Listings. Cite specific policies where applicable. Use markdown with headers (###, ####), bullet points (*), and bold text. Include markdown links to listings as [Listing Title](/marketplace/ID) when referring to them.
+Strictly ground your answer in the provided Knowledge Documents. Cite specific policies where applicable. Use markdown with headers (###, ####), bullet points (*), and bold text.
+Never name, recommend or describe specific listings, stock levels, prices or ratings: you have no inventory data. If the user wants to find or book items, tell them to ask for the item directly (e.g. "30 chairs on 28th October") so the live inventory can be checked.
+If the documents don't answer the question, say you don't know rather than guessing.
+The earlier messages in this conversation are included: use them to understand follow-up questions ("and who decides?", "what about the deposit?"), but answer only from the documents.
 
 [RETRIEVED KNOWLEDGE DOCUMENTS]:
-${knowledgeContext || "None"}
-
-[RETRIEVED DATABASE LISTINGS]:
-${listingsContext || "None"}`;
+${knowledgeContext || "None"}`;
 
     // 1. Groq API call (ultra-fast LLM inference)
     if (process.env.GROQ_API_KEY) {
@@ -286,6 +351,7 @@ ${listingsContext || "None"}`;
               model: groqModel,
               messages: [
                 { role: "system", content: systemPrompt },
+                ...priorTurns,
                 { role: "user", content: query }
               ],
               temperature: 0.3,
@@ -313,7 +379,9 @@ ${listingsContext || "None"}`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [
-              { role: "user", parts: [{ text: `${systemPrompt}\n\nUser Question: ${query}` }] }
+              { role: "user", parts: [{ text: systemPrompt }] },
+              ...priorTurns.map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.content }] })),
+              { role: "user", parts: [{ text: `User Question: ${query}` }] }
             ]
           })
         });
@@ -341,6 +409,7 @@ ${listingsContext || "None"}`;
             model: "gpt-4o-mini",
             messages: [
               { role: "system", content: systemPrompt },
+              ...priorTurns,
               { role: "user", content: query }
             ],
             temperature: 0.3

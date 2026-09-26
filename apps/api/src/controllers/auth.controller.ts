@@ -39,9 +39,15 @@ export class AuthController {
         return;
       }
       const tokens = AuthService.refreshTokens(refreshToken);
+      // A rejected or suspended account can't keep renewing its session.
+      await AuthService.assertAccountActive(tokens.userId);
       res.status(200).json({ success: true, data: { token: tokens.accessToken, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } });
     } catch (error) {
-      res.status(401).json({ success: false, error: { code: "INVALID_REFRESH_TOKEN", message: error instanceof Error ? error.message : "Invalid token" } });
+      const e = error as { statusCode?: number; code?: string; message?: string };
+      res.status(e.statusCode ?? 401).json({
+        success: false,
+        error: { code: e.code ?? "INVALID_REFRESH_TOKEN", message: e.message ?? "Invalid token" },
+      });
     }
   }
 

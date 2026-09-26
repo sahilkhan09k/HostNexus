@@ -15,7 +15,7 @@ export class NegotiationController {
   /** GET /api/negotiations/:bookingId */
   static async get(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const neg = await NegotiationService.getByBookingId(String(req.params.bookingId));
+      const neg = await NegotiationService.getByBookingId(String(req.params.bookingId), req.userId!);
       res.status(200).json({ success: true, data: { negotiation: neg } });
     } catch (err) { next(err); }
   }

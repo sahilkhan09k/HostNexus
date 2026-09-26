@@ -1,12 +1,37 @@
+import type { BookingRequest, Prisma } from "@prisma/client";
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { RazorpayService } from "./razorpay.service.js";
+import { PaymentService } from "./payment.service.js";
 import { assertCapacity, lockResource } from "./capacity.js";
+import {
+  RENTER_INSPECTION_MS,
+  OWNER_INSPECTION_MS,
+  OWNER_RECEIPT_WINDOW_MS,
+  HANDOVER_ISSUE_RESPONSE_MS,
+  RETURN_CLAIM_RESPONSE_MS,
+  MAX_HANDOVER_CODE_ATTEMPTS,
+  addMs,
+  toCalendarDay,
+  todayIst,
+  inclusiveDays,
+  istDayEnd,
+  requestExpiresAt,
+  paymentDeadlineFor,
+  handoverOpensAt,
+  handoverDeadlineFor,
+  nonReturnEscalatesAt,
+  generateHandoverCode,
+  safeEqual,
+} from "./booking-rules.js";
+import { badRequest, conflict, forbidden, notFound, HttpError } from "../utils/http-error.js";
 import type {
   CreateBookingRequestInput,
   UpdateBookingStatusInput,
   BookingQuery,
+  HandoverInput,
   RenterReceivingInspectionInput,
+  OwnerHandoverResponseInput,
   ReturnInitiationInput,
   OwnerReceiptInput,
   OwnerDamageClaimInput,
@@ -14,255 +39,417 @@ import type {
   AdminResolveDisputeInput,
 } from "../schemas/booking.schema.js";
 
+type Tx = Prisma.TransactionClient;
+type ActorRole = "OWNER" | "RENTER" | "ADMIN" | "SYSTEM";
+
+const rupees = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
+
+/** Row-lock a booking for the rest of the transaction and return its fresh state. */
+async function lockBooking(tx: Tx, bookingId: string): Promise<BookingRequest> {
+  await tx.$queryRaw`SELECT id FROM "booking_requests" WHERE id = ${bookingId} FOR UPDATE`;
+  const booking = await tx.bookingRequest.findUnique({ where: { id: bookingId } });
+  if (!booking) throw notFound("Booking not found");
+  return booking;
+}
+
+/** The handover code is a secret for the renter; strip it for everyone else. */
+function forViewer<T extends { seekerId: string }>(booking: T, viewerBusinessId?: string | null): T {
+  if (viewerBusinessId && viewerBusinessId === booking.seekerId) return booking;
+  const { handoverCode: _secret, ...rest } = booking as T & { handoverCode?: string | null };
+  return rest as T;
+}
+
+async function requireBusiness(userId: string) {
+  const business = await BusinessService.getBusinessByUserId(userId);
+  if (!business) throw forbidden("You must have a business to manage bookings");
+  return business;
+}
+
+function assertStatus(booking: BookingRequest, expected: string | string[], message: string) {
+  const ok = Array.isArray(expected) ? expected.includes(booking.bookingStatus) : booking.bookingStatus === expected;
+  if (!ok) throw conflict(message, "INVALID_BOOKING_STATE");
+}
+
+let deadlineRun: Promise<void> | null = null;
+
 export class BookingService {
   // ─────────────────────────────────────────────────────────────────────
-  // TIMELINE HELPER
+  // HELPERS
   // ─────────────────────────────────────────────────────────────────────
 
   /**
-   * Record a chronological audit timeline event (fire-and-forget safe).
+   * Record an audit timeline event. Inside a transaction (db given) it is part
+   * of the same atomic write; otherwise it is best-effort.
    */
   static async recordTimelineEvent(
     bookingId: string,
     eventType: string,
     actorId: string | null,
-    actorRole: "OWNER" | "RENTER" | "ADMIN" | "SYSTEM",
+    actorRole: ActorRole,
     title: string,
     description: string,
-    metadata: Record<string, unknown> | null = null
+    metadata: Record<string, unknown> | null = null,
+    db?: Tx
   ) {
+    const data = {
+      bookingId,
+      eventType,
+      actorId,
+      actorRole,
+      title,
+      description,
+      metadata: metadata ? (metadata as any) : undefined,
+    };
+    if (db) {
+      await db.bookingTimelineEvent.create({ data });
+      return;
+    }
     try {
-      await prisma.bookingTimelineEvent.create({
-        data: {
-          bookingId,
-          eventType,
-          actorId,
-          actorRole,
-          title,
-          description,
-          metadata: metadata ? (metadata as any) : undefined,
-        },
-      });
+      await prisma.bookingTimelineEvent.create({ data });
     } catch (e) {
       console.error("Failed to record timeline event:", e);
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // FIX #13 — Concurrent-safe expired inspection processing
-  // Uses an in-transaction re-validation to prevent duplicate payouts
-  // when the lazy-check path and the cron run simultaneously.
-  // ─────────────────────────────────────────────────────────────────────
+  /**
+   * Run a state transition with the booking row locked, then send any refunds
+   * the transition queued. Every state change goes through here, so two
+   * concurrent actions on one booking can never both succeed.
+   */
+  private static async inBookingTx<T>(
+    bookingId: string,
+    fn: (tx: Tx, booking: BookingRequest) => Promise<T>
+  ): Promise<T> {
+    const result = await prisma.$transaction(
+      async (tx) => fn(tx, await lockBooking(tx, bookingId)),
+      { maxWait: 10_000, timeout: 20_000 }
+    );
+    await PaymentService.processRefunds(bookingId).catch((err) =>
+      console.error(`[Payments] Refund processing for ${bookingId} failed:`, err)
+    );
+    return result;
+  }
+
+  private static async closeNegotiation(tx: Tx, bookingId: string) {
+    await tx.negotiationOffer.updateMany({
+      where: { status: "PENDING", negotiation: { bookingId } },
+      data: { status: "REJECTED" },
+    });
+    await tx.negotiation.updateMany({
+      where: { bookingId, status: "OPEN" },
+      data: { status: "CANCELLED" },
+    });
+  }
 
   /**
-   * Idempotent server-side evaluation of expired inspections
-   * (Renter 1hr & Owner 2hr).
+   * Cancel a booking before handover. Anything held in escrow goes back to the
+   * renter in full.
    */
-  static async processExpiredInspections(): Promise<void> {
-    const now = new Date();
+  private static async cancelBooking(
+    tx: Tx,
+    booking: BookingRequest,
+    opts: {
+      by: "RENTER" | "OWNER" | "SYSTEM";
+      legacyStatus?: string;
+      reason: string;
+      eventType: string;
+      title: string;
+      actorId: string | null;
+      actorRole: ActorRole;
+    }
+  ) {
+    let financialStatus = booking.financialStatus === "PENDING_PAYMENT" ? "NO_PAYMENT" : booking.financialStatus;
+    let refundNote = "";
+    if (booking.financialStatus === "FUNDS_HELD") {
+      const { heldPaise } = await PaymentService.ledger(tx, booking.id);
+      await PaymentService.queueRefund(tx, booking.id, "FULL_REFUND", heldPaise);
+      financialStatus = "FULLY_REFUNDED";
+      refundNote = ` Full payment of ${rupees(heldPaise)} is being refunded to the renter.`;
+    }
 
-    // 1. Renter inspection timeouts (1 hour expired without reporting an issue)
-    const expiredRenterInspections = await prisma.bookingRequest.findMany({
-      where: {
-        bookingStatus: "HANDOVER_INSPECTION",
-        renterInspectionDeadline: { lte: now },
+    const updated = await tx.bookingRequest.update({
+      where: { id: booking.id },
+      data: {
+        bookingStatus: "CANCELLED",
+        financialStatus,
+        status: opts.legacyStatus ?? "cancelled",
+        cancelledAt: new Date(),
+        cancelledBy: opts.by,
+        rejectionReason: opts.reason,
+        handoverCode: null,
       },
     });
+    await this.closeNegotiation(tx, booking.id);
+    await this.recordTimelineEvent(
+      booking.id, opts.eventType, opts.actorId, opts.actorRole, opts.title,
+      `${opts.reason}${refundNote}`, null, tx
+    );
+    return updated;
+  }
 
-    for (const booking of expiredRenterInspections) {
-      await prisma.$transaction(async (tx) => {
-        // Re-validate inside transaction to prevent concurrent duplicates (#13)
-        const fresh = await tx.bookingRequest.findUnique({
-          where: { id: booking.id },
-          select: { bookingStatus: true, financialStatus: true },
-        });
-        if (fresh?.bookingStatus !== "HANDOVER_INSPECTION") return;
+  /** Release rent + transport to the owner, less any part refunded to the renter. */
+  private static async releaseRent(tx: Tx, booking: BookingRequest, refundToRenterPaise = 0) {
+    const rentAndTransport = booking.rentAmountPaise + booking.transportFeePaise;
+    const refund = Math.min(Math.max(0, refundToRenterPaise), rentAndTransport);
+    await PaymentService.queueRefund(tx, booking.id, "RENT_REFUND", refund);
+    await PaymentService.queuePayout(tx, booking.id, "RENT_PAYOUT", rentAndTransport - refund);
+    return { ownerPaise: rentAndTransport - refund, refundPaise: refund };
+  }
 
-        await tx.bookingRequest.update({
-          where: { id: booking.id },
-          data: {
-            bookingStatus: "ACTIVE",
-            financialStatus: "RENT_RELEASED",
-            status: "active",
-          },
-        });
+  /** Split the security deposit: `ownerShare` to the owner, the rest back to the renter. */
+  private static async settleDeposit(tx: Tx, booking: BookingRequest, ownerShareRequested: number) {
+    const deposit = booking.securityDepositPaise;
+    const ownerShare = Math.min(Math.max(0, ownerShareRequested), deposit);
+    await PaymentService.queuePayout(tx, booking.id, "DAMAGE_PAYOUT", ownerShare);
+    await PaymentService.queueRefund(tx, booking.id, "DEPOSIT_REFUND", deposit - ownerShare);
+    const financialStatus =
+      ownerShare === 0 ? "DEPOSIT_REFUNDED" : ownerShare === deposit ? "DEPOSIT_TO_OWNER" : "PARTIAL_SETTLEMENT";
+    return { ownerShare, renterShare: deposit - ownerShare, financialStatus };
+  }
 
-        await tx.paymentTransaction.create({
-          data: {
-            bookingId: booking.id,
-            type: "RENT_PAYOUT",
-            amountPaise: booking.rentAmountPaise + booking.transportFeePaise, // transport fee is paid out with rent
-            status: "COMPLETED",
-            providerReference: `AUTO_RENT_${booking.id}`,   // stable, booking-id-scoped (#18)
-          },
-        });
+  private static async latestDispute(tx: Tx, bookingId: string) {
+    return tx.dispute.findFirst({
+      where: { bookingId },
+      orderBy: { createdAt: "desc" },
+      include: { damageClaim: true },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // DEADLINES — run by the background worker and lazily on reads
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Enforce every expired deadline. Concurrent callers share one run. */
+  static processDeadlines(): Promise<void> {
+    if (!deadlineRun) {
+      deadlineRun = this.runDeadlineSweeps().finally(() => {
+        deadlineRun = null;
       });
-
-      await this.recordTimelineEvent(
-        booking.id,
-        "AUTO_TIMEOUT_RELEASE",
-        null,
-        "SYSTEM",
-        "Renter Inspection Window Expired (Auto-Accepted)",
-        "The 1-hour inspection window elapsed without reported defects. Resource marked active and rent released to owner; deposit remains safely in escrow."
-      );
     }
+    return deadlineRun;
+  }
 
-    // 2. Owner return inspection timeouts (2 hours expired without damage claim)
-    const expiredOwnerInspections = await prisma.bookingRequest.findMany({
-      where: {
-        bookingStatus: "OWNER_INSPECTION",
-        ownerInspectionDeadline: { lte: now },
-      },
-      include: { damageClaims: true },
-    });
+  /** Kept for the worker and older callers. */
+  static processExpiredInspections(): Promise<void> {
+    return this.processDeadlines();
+  }
 
-    for (const booking of expiredOwnerInspections) {
-      // Only auto-refund if no claim was submitted
-      if (booking.damageClaims.length === 0) {
-        await prisma.$transaction(async (tx) => {
-          // Re-validate inside transaction (#13)
-          const fresh = await tx.bookingRequest.findUnique({
-            where: { id: booking.id },
-            select: { bookingStatus: true, financialStatus: true },
-          });
-          if (fresh?.bookingStatus !== "OWNER_INSPECTION") return;
+  private static async runDeadlineSweeps(): Promise<void> {
+    const now = new Date();
+    const ids = async (where: Prisma.BookingRequestWhereInput) =>
+      (await prisma.bookingRequest.findMany({ where, select: { id: true } })).map((b) => b.id);
+    const each = async (bookingIds: string[], fn: (id: string) => Promise<unknown>) => {
+      for (const id of bookingIds) {
+        try {
+          await fn(id);
+        } catch (err) {
+          console.error(`[Deadlines] ${id}:`, err);
+        }
+      }
+    };
 
-          await tx.bookingRequest.update({
-            where: { id: booking.id },
-            data: {
-              bookingStatus: "COMPLETED",
-              financialStatus: "DEPOSIT_REFUNDED",
-              completedAt: now,
-              status: "completed",
-            },
-          });
+    // 1. Requests nobody accepted before their start day ended
+    await each(await ids({ bookingStatus: "BOOKING_REQUESTED", startDate: { lte: now } }), (id) =>
+      this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "BOOKING_REQUESTED" || requestExpiresAt(b.startDate) > now) return;
+        await this.cancelBooking(tx, b, {
+          by: "SYSTEM", legacyStatus: "expired", reason: "Request expired: the owner did not respond before the start date.",
+          eventType: "REQUEST_EXPIRED", title: "Booking Request Expired", actorId: null, actorRole: "SYSTEM",
+        });
+      })
+    );
 
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId: booking.id,
-              type: "DEPOSIT_REFUND",
-              amountPaise: booking.securityDepositPaise,
-              status: "COMPLETED",
-              providerReference: `AUTO_REFUND_${booking.id}`,   // stable (#18)
-            },
+    // 2. Accepted but never paid
+    await each(
+      await ids({ bookingStatus: "BOOKING_ACCEPTED", financialStatus: "PENDING_PAYMENT", paymentDeadline: { lte: now } }),
+      async (id) => {
+        // Never cancel a booking whose payment went through but was not verified
+        if (await this.reconcilePayment(id).catch(() => false)) return;
+        await this.inBookingTx(id, async (tx, b) => {
+          if (b.bookingStatus !== "BOOKING_ACCEPTED" || b.financialStatus !== "PENDING_PAYMENT") return;
+          await this.cancelBooking(tx, b, {
+            by: "SYSTEM", legacyStatus: "expired", reason: "Payment deadline passed: the renter did not fund escrow in time. The units have been released.",
+            eventType: "PAYMENT_EXPIRED", title: "Unpaid Booking Cancelled", actorId: null, actorRole: "SYSTEM",
           });
         });
-
-        await this.recordTimelineEvent(
-          booking.id,
-          "AUTO_TIMEOUT_RELEASE",
-          null,
-          "SYSTEM",
-          "Owner Inspection Window Expired (Deposit Auto-Refunded)",
-          "The 2-hour owner return inspection window elapsed without damage claims. Full security deposit has been automatically refunded to the renter."
-        );
       }
-    }
+    );
+
+    // 3. Paid, but the owner never handed over — owner no-show
+    await each(
+      await ids({ bookingStatus: "BOOKING_ACCEPTED", financialStatus: "FUNDS_HELD", handoverDeadline: { lte: now } }),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "BOOKING_ACCEPTED" || b.financialStatus !== "FUNDS_HELD") return;
+        await this.cancelBooking(tx, b, {
+          by: "OWNER", reason: "Owner no-show: the resource was not handed over by the deadline.",
+          eventType: "OWNER_NO_SHOW", title: "Cancelled — Owner Did Not Hand Over", actorId: null, actorRole: "SYSTEM",
+        });
+      })
+    );
+
+    // 4. Renter inspection window expired without a report → auto-accept
+    await each(
+      await ids({ bookingStatus: "HANDOVER_INSPECTION", renterInspectionDeadline: { lte: now } }),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "HANDOVER_INSPECTION") return;
+        const { ownerPaise } = await this.releaseRent(tx, b);
+        await tx.bookingRequest.update({
+          where: { id: b.id },
+          data: { bookingStatus: "ACTIVE", financialStatus: "RENT_RELEASED", status: "active", receivedQuantity: b.quantity },
+        });
+        await this.recordTimelineEvent(
+          b.id, "AUTO_TIMEOUT_RELEASE", null, "SYSTEM",
+          "Renter Inspection Window Expired (Auto-Accepted)",
+          `The 1-hour inspection window elapsed without a reported issue. ${rupees(ownerPaise)} (rent${b.transportFeePaise > 0 ? " + transport" : ""}) queued for payout to the owner; the deposit stays in escrow.`,
+          null, tx
+        );
+      })
+    );
+
+    // 5. Owner ignored a handover issue → renter refunded in full
+    await each(
+      (await prisma.dispute.findMany({
+        where: { kind: "HANDOVER_ISSUE", status: "OPEN", responseDeadline: { lte: now }, booking: { bookingStatus: "DISPUTED" } },
+        select: { bookingId: true },
+      })).map((d) => d.bookingId),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        const dispute = await this.latestDispute(tx, id);
+        if (b.bookingStatus !== "DISPUTED" || dispute?.kind !== "HANDOVER_ISSUE" || dispute.status !== "OPEN") return;
+        await this.resolveHandoverIssue(tx, b, dispute.id, "FULL_REFUND", 0,
+          "The owner did not respond to the renter's handover issue within 24 hours.", null, "SYSTEM");
+      })
+    );
+
+    // 6. Nothing returned well after the last rental day → non-return dispute for admin
+    await each(await ids({ bookingStatus: "ACTIVE", endDate: { lte: now } }), (id) =>
+      this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "ACTIVE" || nonReturnEscalatesAt(b.endDate) > now) return;
+        await this.openNonReturnDispute(tx, b, null, "SYSTEM");
+      })
+    );
+
+    // 7. Owner never confirmed a return → receipt confirmed automatically
+    await each(
+      await ids({ bookingStatus: "RETURN_INITIATED", ownerReceiptDeadline: { lte: now } }),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "RETURN_INITIATED") return;
+        const deadline = addMs(now, OWNER_INSPECTION_MS);
+        await tx.bookingRequest.update({
+          where: { id: b.id },
+          data: {
+            bookingStatus: "OWNER_INSPECTION",
+            status: "owner_inspection",
+            ownerReceivedAt: now,
+            ownerReceivedQuantity: b.returnedQuantity ?? b.quantity,
+            ownerInspectionDeadline: deadline,
+          },
+        });
+        await this.recordTimelineEvent(
+          b.id, "OWNER_RECEIPT_AUTO_CONFIRMED", null, "SYSTEM",
+          "Return Receipt Auto-Confirmed",
+          `The owner did not confirm receipt within 24 hours of the return, so receipt was confirmed automatically. The owner has 2 hours (until ${deadline.toISOString()}) to accept the return or file a claim.`,
+          null, tx
+        );
+      })
+    );
+
+    // 8. Owner inspection window expired without a claim → deposit refunded
+    await each(
+      await ids({ bookingStatus: "OWNER_INSPECTION", ownerInspectionDeadline: { lte: now } }),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        if (b.bookingStatus !== "OWNER_INSPECTION") return;
+        await this.settleDeposit(tx, b, 0);
+        await tx.bookingRequest.update({
+          where: { id: b.id },
+          data: { bookingStatus: "COMPLETED", financialStatus: "DEPOSIT_REFUNDED", status: "completed", completedAt: now },
+        });
+        await this.recordTimelineEvent(
+          b.id, "AUTO_TIMEOUT_RELEASE", null, "SYSTEM",
+          "Owner Inspection Window Expired (Deposit Auto-Refunded)",
+          `The 2-hour owner inspection window elapsed without a claim. The security deposit of ${rupees(b.securityDepositPaise)} is being refunded to the renter.`,
+          null, tx
+        );
+      })
+    );
+
+    // 9. Renter ignored a return claim → claim accepted
+    await each(
+      (await prisma.dispute.findMany({
+        where: { kind: "RETURN_CLAIM", status: "OPEN", responseDeadline: { lte: now }, booking: { bookingStatus: "DISPUTED" } },
+        select: { bookingId: true },
+      })).map((d) => d.bookingId),
+      (id) => this.inBookingTx(id, async (tx, b) => {
+        const dispute = await this.latestDispute(tx, id);
+        if (b.bookingStatus !== "DISPUTED" || dispute?.kind !== "RETURN_CLAIM" || dispute.status !== "OPEN") return;
+        await this.settleReturnClaim(tx, b, dispute, dispute.damageClaim?.claimedAmountPaise ?? b.securityDepositPaise,
+          "PAY_OWNER", "The renter did not respond to the claim within 48 hours; the claim was accepted.", null, "SYSTEM");
+      })
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────
   // CREATE BOOKING REQUEST
   // ─────────────────────────────────────────────────────────────────────
 
-  /**
-   * Create a new booking request with commercial & condition snapshots.
-   * FIX #17: Validates availability windows & booking conflicts.
-   * FIX #19: Strict startDate < endDate check.
-   * FIX #21: Validates requested quantity against resource.quantity.
-   */
-  static async createBookingRequest(
-    userId: string,
-    input: CreateBookingRequestInput
-  ) {
-    const seekerBusiness = await BusinessService.getBusinessByUserId(userId);
-    if (!seekerBusiness) {
-      throw new Error("You must have a business to create booking requests");
-    }
+  static async createBookingRequest(userId: string, input: CreateBookingRequestInput) {
+    const seekerBusiness = await requireBusiness(userId);
 
     const resource = await prisma.resource.findUnique({
       where: { id: input.resourceId },
       include: {
-        business: true,
+        business: { include: { owner: { select: { verificationStatus: true } } } },
         availabilityWindows: true,
       },
     });
 
-    if (!resource) throw new Error("Resource not found");
-    if (!resource.isActive) throw new Error("This resource is not available for booking");
+    if (!resource || resource.deletedAt) throw notFound("Resource not found");
+    if (!resource.isActive || resource.business.owner?.verificationStatus !== "VERIFIED") {
+      throw conflict("This resource is not available for booking");
+    }
     if (resource.businessId === seekerBusiness.id) {
-      throw new Error("You cannot book your own resource");
+      throw badRequest("You cannot book your own resource");
     }
 
-    const startDate = new Date(input.startDate);
-    const endDate   = new Date(input.endDate);
+    const startDate = toCalendarDay(input.startDate);
+    const endDate   = toCalendarDay(input.endDate);
 
-    // FIX #19: Strict date validation
-    if (endDate <= startDate) {
-      throw new Error("End date must be strictly after start date");
-    }
+    if (endDate < startDate) throw badRequest("End date cannot be before the start date");
+    if (startDate < todayIst()) throw badRequest("Start date cannot be in the past");
 
-    const totalDays = Math.ceil(
-      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
+    const totalDays = inclusiveDays(startDate, endDate);
 
-    // FIX #21: Quantity guard
     if (input.quantity > resource.quantity) {
-      throw new Error(
-        `Requested quantity (${input.quantity}) exceeds available quantity (${resource.quantity})`
-      );
+      throw badRequest(`Requested quantity (${input.quantity}) exceeds the listed quantity (${resource.quantity})`);
     }
 
-    // FIX #17a: Availability window check
+    // A window must cover every booked day (window dates are inclusive too)
+    const windows = resource.availabilityWindows ?? [];
     const hasAvailability =
-      !resource.availabilityWindows ||
-      resource.availabilityWindows.length === 0 ||
-      resource.availabilityWindows.some(
-        (w) => w.fromDate <= startDate && w.toDate >= endDate
-      );
+      windows.length === 0 ||
+      windows.some((w) => toCalendarDay(w.fromDate) <= startDate && toCalendarDay(w.toDate) >= endDate);
     if (!hasAvailability) {
-      throw new Error(
-        "The resource is not available for the requested date range. Please check the owner's availability calendar."
-      );
+      throw conflict("The resource is not available for the requested dates. Please check the owner's availability calendar.");
     }
 
     // Transport: renter may only pick the owner's transport if the listing offers it.
     const useProviderTransport = input.transportMode === "PROVIDER";
     if (useProviderTransport && !resource.transportAvailable) {
-      throw new Error("The owner does not provide transport for this resource");
+      throw badRequest("The owner does not provide transport for this resource");
     }
     const transportDistanceKm     = useProviderTransport ? input.transportDistanceKm! : null;
     const transportRatePerKmPaise = useProviderTransport ? resource.transportRatePerKmPaise : 0;
-    const transportFeePaise       = useProviderTransport
-      ? Math.round(transportRatePerKmPaise * transportDistanceKm!)
-      : 0;
+    const transportFeePaise       = useProviderTransport ? Math.round(transportRatePerKmPaise * transportDistanceKm!) : 0;
 
-    // Financial calculation in paise
-    const rentAmountPaise      = resource.rentAmountPaise * totalDays;
+    // The listed rent is per unit per day (as the listing form states)
+    const rentAmountPaise      = resource.rentAmountPaise * totalDays * input.quantity;
     const securityDepositPaise = resource.securityDepositPaise;
     const totalAmountPaise     = rentAmountPaise + securityDepositPaise + transportFeePaise;
 
-    const conditionSnapshot = {
-      resourceName: resource.name,
-      resourceType: resource.resourceType,
-      quantity:     input.quantity,
-      location:     resource.location,
-    };
-
-    const listingPhotosSnapshot    = resource.photos || [];
-    const damageDisclosureSnapshot = {
-      hasPreExistingDamage: resource.hasPreExistingDamage,
-      damageDescription:    resource.damageDescription,
-      damagePhotos:         resource.damagePhotos || [],
-    };
-
-    // FIX #17b: Quantity-aware conflict check, atomic with the insert.
-    // The resource row lock serialises concurrent creates/accepts for this resource.
     const bookingRequest = await prisma.$transaction(async (tx) => {
       await lockResource(tx, resource.id);
       await assertCapacity(tx, resource, input.quantity, startDate, endDate);
 
-      return tx.bookingRequest.create({
+      const created = await tx.bookingRequest.create({
         data: {
           seekerId:   seekerBusiness.id,
           providerId: resource.businessId,
@@ -283,64 +470,60 @@ export class BookingService {
           transportRatePerKmPaise,
           transportFeePaise,
           proposedPrice: input.proposedPrice ?? (totalAmountPaise / 100),
-          conditionSnapshot:        conditionSnapshot as any,
-          listingPhotosSnapshot,
-          damageDisclosureSnapshot: damageDisclosureSnapshot as any,
+          conditionSnapshot: {
+            resourceName: resource.name,
+            resourceType: resource.resourceType,
+            quantity:     input.quantity,
+            location:     resource.location,
+          } as any,
+          listingPhotosSnapshot: resource.photos || [],
+          damageDisclosureSnapshot: {
+            hasPreExistingDamage: resource.hasPreExistingDamage,
+            damageDescription:    resource.damageDescription,
+            damagePhotos:         resource.damagePhotos || [],
+          } as any,
           termsVersion: "v2.0",
         },
-        include: {
-          resource: true,
-          seeker:   true,
-          provider: true,
-        },
+        include: { resource: true, seeker: true, provider: true },
       });
-    });
 
-    await this.recordTimelineEvent(
-      bookingRequest.id,
-      "BOOKING_CREATED",
-      seekerBusiness.id,
-      "RENTER",
-      "Booking Requested",
-      `Requested by ${seekerBusiness.name} for ${totalDays} day(s). Rent: ₹${(rentAmountPaise / 100).toLocaleString()}, Deposit: ₹${(securityDepositPaise / 100).toLocaleString()}. ${
-        useProviderTransport
-          ? `Owner transport: ${transportDistanceKm} km × ₹${(transportRatePerKmPaise / 100).toLocaleString()}/km = ₹${(transportFeePaise / 100).toLocaleString()}.`
-          : "Renter arranges own transport."
-      }`
-    );
+      await this.recordTimelineEvent(
+        created.id, "BOOKING_CREATED", seekerBusiness.id, "RENTER",
+        "Booking Requested",
+        `Requested by ${seekerBusiness.name} for ${totalDays} day(s). Rent: ${rupees(rentAmountPaise)}, Deposit: ${rupees(securityDepositPaise)}. ${
+          useProviderTransport
+            ? `Owner transport: ${transportDistanceKm} km × ${rupees(transportRatePerKmPaise)}/km = ${rupees(transportFeePaise)}.`
+            : "Renter arranges own transport."
+        }`,
+        null, tx
+      );
+      return created;
+    });
 
     return bookingRequest;
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // READ OPERATIONS
+  // READ OPERATIONS (participants only)
   // ─────────────────────────────────────────────────────────────────────
 
   static async getBookingRequests(userId: string, query: BookingQuery) {
-    await this.processExpiredInspections();
+    await this.processDeadlines();
+    const business = await requireBusiness(userId);
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("You must have a business to view booking requests");
+    const where: Prisma.BookingRequestWhereInput = {};
+    if (query.type === "incoming") where.providerId = business.id;
+    else if (query.type === "outgoing") where.seekerId = business.id;
+    else where.OR = [{ providerId: business.id }, { seekerId: business.id }];
 
-    let where: any = {};
-    if (query.type === "incoming") {
-      where.providerId = business.id;
-    } else if (query.type === "outgoing") {
-      where.seekerId = business.id;
-    } else {
-      where.OR = [{ providerId: business.id }, { seekerId: business.id }];
-    }
-
-    if (query.bookingStatus)  where.bookingStatus  = query.bookingStatus;
+    if (query.bookingStatus)   where.bookingStatus   = query.bookingStatus;
     if (query.financialStatus) where.financialStatus = query.financialStatus;
     if (query.status)          where.status          = query.status;
 
-    return prisma.bookingRequest.findMany({
+    const bookings = await prisma.bookingRequest.findMany({
       where,
       include: {
-        resource: {
-          select: { id: true, name: true, resourceType: true, location: true, photos: true },
-        },
+        resource: { select: { id: true, name: true, resourceType: true, location: true, photos: true } },
         seeker:   { select: { id: true, name: true } },
         provider: { select: { id: true, name: true } },
         damageClaims: { orderBy: { createdAt: "desc" } },
@@ -357,29 +540,27 @@ export class BookingService {
       },
       orderBy: { createdAt: "desc" },
     });
+    return bookings.map((b) => forViewer(b, business.id));
   }
 
-  static async getBookingRequestById(bookingId: string) {
-    await this.processExpiredInspections();
+  /** Returns null (→ 404) unless the caller is the renter or the owner. */
+  static async getBookingRequestById(bookingId: string, userId: string) {
+    await this.processDeadlines();
+    const business = await BusinessService.getBusinessByUserId(userId);
+    if (!business) return null;
 
-    return prisma.bookingRequest.findUnique({
+    const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
       include: {
         resource: true,
         seeker:   true,
         provider: true,
-        inspections: {
-          include: { evidence: true },
-          orderBy: { createdAt: "asc" },
-        },
+        inspections: { include: { evidence: true }, orderBy: { createdAt: "asc" } },
         evidence:    { orderBy: { createdAt: "asc" } },
-        damageClaims: {
-          include: { disputes: true },
-          orderBy: { createdAt: "desc" },
-        },
-        disputes:           { orderBy: { createdAt: "desc" } },
-        paymentTransactions:{ orderBy: { createdAt: "asc" } },
-        timelineEvents:     { orderBy: { createdAt: "asc" } },
+        damageClaims: { include: { disputes: true }, orderBy: { createdAt: "desc" } },
+        disputes:            { orderBy: { createdAt: "desc" } },
+        paymentTransactions: { orderBy: { createdAt: "asc" } },
+        timelineEvents:      { orderBy: { createdAt: "asc" } },
         negotiation: {
           include: {
             offers: {
@@ -390,209 +571,194 @@ export class BookingService {
         },
       },
     });
+    if (!booking) return null;
+    if (booking.seekerId !== business.id && booking.providerId !== business.id) return null;
+    return forViewer(booking, business.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // STATUS TRANSITIONS
+  // ACCEPT / REJECT / CANCEL
   // ─────────────────────────────────────────────────────────────────────
 
-  /**
-   * Owner accepts / rejects booking request; renter can cancel.
-   * FIX #14: Refunds escrow on cancellation if funds are held.
-   * FIX #16: Removed dead "completed" branch — handled by ownerAcceptReturn.
-   */
-  static async updateBookingStatus(
-    bookingId: string,
-    userId: string,
-    input: UpdateBookingStatusInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: { provider: true, seeker: true },
-    });
-    if (!booking) throw new Error("Booking request not found");
+  static async updateBookingStatus(bookingId: string, userId: string, input: UpdateBookingStatusInput) {
+    const business = await requireBusiness(userId);
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("You must have a business to update bookings");
-
-    const isProvider = booking.providerId === business.id;
-    const isSeeker   = booking.seekerId   === business.id;
-
-    if (!isProvider && !isSeeker) {
-      throw new Error("Unauthorized to update this booking");
+    // Accepting also needs the resource lock (capacity), taken before the booking lock.
+    if (input.status === "accepted") {
+      const existing = await prisma.bookingRequest.findUnique({ where: { id: bookingId } });
+      if (!existing) throw notFound("Booking request not found");
+      if (existing.providerId !== business.id) throw forbidden("Only the owner can accept bookings");
+      return forViewer(await this.acceptBooking(bookingId, existing.resourceId, business, null), business.id);
     }
 
-    // ── ACCEPT ────────────────────────────────────────────────────────
-    if (input.status === "accepted") {
-      if (!isProvider) throw new Error("Only the owner can accept bookings");
-      if (booking.bookingStatus !== "BOOKING_REQUESTED") {
-        throw new Error("Booking can only be accepted when in BOOKING_REQUESTED status");
+    // If a checkout succeeded but was never verified, record it first so the
+    // cancellation below refunds it instead of leaving the money stranded.
+    if (input.status === "cancelled") {
+      await this.reconcilePayment(bookingId).catch((err) =>
+        console.error(`[Payments] Reconcile before cancel failed for ${bookingId}:`, err)
+      );
+    }
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      const isProvider = booking.providerId === business.id;
+      const isSeeker   = booking.seekerId   === business.id;
+      if (!isProvider && !isSeeker) throw forbidden("You are not a party to this booking");
+
+      if (input.status === "rejected") {
+        if (!isProvider) throw forbidden("Only the owner can reject bookings");
+        assertStatus(booking, "BOOKING_REQUESTED", "Only a pending request can be rejected");
+        return this.cancelBooking(tx, booking, {
+          by: "OWNER", legacyStatus: "rejected",
+          reason: input.rejectionReason || "Owner declined the booking request.",
+          eventType: "BOOKING_REJECTED", title: "Booking Rejected", actorId: business.id, actorRole: "OWNER",
+        });
       }
 
-      // Re-check capacity at accept time: several pending requests may overlap,
-      // and only the ones that still fit may be accepted.
-      const updated = await prisma.$transaction(async (tx) => {
-        await lockResource(tx, booking.resourceId);
-        const resource = await tx.resource.findUnique({ where: { id: booking.resourceId } });
-        if (!resource) throw new Error("Resource not found");
+      // cancelled
+      if (isSeeker) {
+        assertStatus(
+          booking, ["BOOKING_REQUESTED", "BOOKING_ACCEPTED"],
+          "A booking can only be cancelled before the resource is handed over"
+        );
+        return this.cancelBooking(tx, booking, {
+          by: "RENTER", reason: input.rejectionReason || "Cancelled by renter.",
+          eventType: "BOOKING_CANCELLED", title: "Booking Cancelled by Renter", actorId: business.id, actorRole: "RENTER",
+        });
+      }
 
-        // Re-read status under the lock so a double-click can't accept twice
-        const current = await tx.bookingRequest.findUnique({ where: { id: bookingId } });
-        if (current?.bookingStatus !== "BOOKING_REQUESTED") {
-          throw new Error("Booking can only be accepted when in BOOKING_REQUESTED status");
+      if (booking.bookingStatus === "BOOKING_REQUESTED") {
+        throw conflict("Use reject to decline a pending request");
+      }
+      assertStatus(booking, "BOOKING_ACCEPTED", "The owner can only cancel an accepted booking before handover");
+      return this.cancelBooking(tx, booking, {
+        by: "OWNER", reason: input.rejectionReason || "Cancelled by owner after accepting.",
+        eventType: "BOOKING_CANCELLED_BY_OWNER", title: "Booking Cancelled by Owner", actorId: business.id, actorRole: "OWNER",
+      });
+    });
+    return forViewer(updated, business.id);
+  }
+
+  /**
+   * Accept a request under the resource lock (capacity) and the booking lock.
+   * Shared with the negotiation flow; `agreedDailyRatePaise` re-prices the rent.
+   */
+  static async acceptBooking(
+    bookingId: string,
+    resourceId: string,
+    actor: { id: string; name: string },
+    agreedDailyRatePaise: number | null,
+    extra?: (tx: Tx, booking: BookingRequest) => Promise<void>
+  ) {
+    const updated = await prisma.$transaction(
+      async (tx) => {
+        await lockResource(tx, resourceId);
+        const booking = await lockBooking(tx, bookingId);
+        assertStatus(booking, "BOOKING_REQUESTED", "Booking can only be accepted while it is a pending request");
+
+        const now = new Date();
+        if (requestExpiresAt(booking.startDate) <= now) {
+          throw conflict("This request has expired: its start date has passed");
         }
 
+        const resource = await tx.resource.findUnique({ where: { id: resourceId } });
+        if (!resource || resource.deletedAt) throw notFound("Resource not found");
         await assertCapacity(tx, resource, booking.quantity, booking.startDate, booking.endDate, bookingId);
 
-        return tx.bookingRequest.update({
+        if (extra) await extra(tx, booking);
+
+        const priceData = agreedDailyRatePaise !== null
+          ? (() => {
+              // Offers are per unit per day, like the listed rent
+              const rent = agreedDailyRatePaise * (booking.totalDays ?? 1) * booking.quantity;
+              return {
+                rentAmountPaise:  rent,
+                totalAmountPaise: rent + booking.securityDepositPaise + booking.transportFeePaise,
+                proposedPrice:    agreedDailyRatePaise / 100,
+                finalPrice:       agreedDailyRatePaise / 100,
+              };
+            })()
+          : {};
+
+        const result = await tx.bookingRequest.update({
           where: { id: bookingId },
-          data: { status: "accepted", bookingStatus: "BOOKING_ACCEPTED" },
+          data: {
+            ...priceData,
+            status: "accepted",
+            bookingStatus: "BOOKING_ACCEPTED",
+            acceptedAt: now,
+            paymentDeadline: paymentDeadlineFor(now, booking.startDate),
+          },
         });
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "BOOKING_ACCEPTED", business.id, "OWNER",
-        "Booking Accepted",
-        `Owner ${booking.provider.name} accepted the booking request. Awaiting renter escrow payment.`
-      );
-      return updated;
-    }
-
-    // ── REJECT ────────────────────────────────────────────────────────
-    if (input.status === "rejected") {
-      if (!isProvider) throw new Error("Only the owner can reject bookings");
-      if (booking.bookingStatus !== "BOOKING_REQUESTED") {
-        throw new Error("Booking can only be rejected when in BOOKING_REQUESTED status");
-      }
-
-      const updated = await prisma.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          status: "rejected",
-          bookingStatus: "CANCELLED",
-          rejectionReason: input.rejectionReason || null,
-        },
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "BOOKING_REJECTED", business.id, "OWNER",
-        "Booking Rejected",
-        input.rejectionReason || "Owner declined the booking request."
-      );
-      return updated;
-    }
-
-    // ── CANCEL (by renter) ────────────────────────────────────────────
-    if (input.status === "cancelled") {
-      if (!isSeeker) throw new Error("Only the requester can cancel bookings");
-
-      // FIX #14: Refund escrow if already funded
-      if (booking.financialStatus === "FUNDS_HELD") {
-        const updated = await prisma.$transaction(async (tx) => {
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId,
-              type: "DEPOSIT_REFUND",
-              amountPaise: booking.totalAmountPaise,
-              status: "COMPLETED",
-              providerReference: `CANCEL_REFUND_${bookingId}`,
-            },
-          });
-
-          return tx.bookingRequest.update({
-            where: { id: bookingId },
-            data: {
-              status: "cancelled",
-              bookingStatus: "CANCELLED",
-              financialStatus: "DEPOSIT_REFUNDED",
-              rejectionReason: input.rejectionReason || "Cancelled by renter",
-            },
-          });
-        });
+        await this.closeNegotiation(tx, bookingId);
 
         await this.recordTimelineEvent(
-          bookingId, "BOOKING_CANCELLED", business.id, "RENTER",
-          "Booking Cancelled (Escrow Refunded)",
-          `Renter cancelled after funding escrow. Full payment of ₹${(booking.totalAmountPaise / 100).toLocaleString()} refunded.`
+          bookingId, "BOOKING_ACCEPTED", actor.id, booking.providerId === actor.id ? "OWNER" : "RENTER",
+          "Booking Accepted",
+          `${agreedDailyRatePaise !== null ? `Accepted at the negotiated rate of ${rupees(agreedDailyRatePaise)}/day.` : `${actor.name} accepted the booking request.`} The renter must pay ${rupees(result.totalAmountPaise)} into escrow by ${result.paymentDeadline!.toISOString()}.`,
+          null, tx
         );
-        return updated;
-      }
-
-      // No funds held — simple cancel
-      const updated = await prisma.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          status: "cancelled",
-          bookingStatus: "CANCELLED",
-          rejectionReason: input.rejectionReason || "Cancelled by renter",
-        },
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "BOOKING_CANCELLED", business.id, "RENTER",
-        "Booking Cancelled",
-        input.rejectionReason || "Renter cancelled the booking."
-      );
-      return updated;
-    }
-
-    return booking;
+        return result;
+      },
+      { maxWait: 10_000, timeout: 20_000 }
+    );
+    return updated;
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // RAZORPAY PAYMENT — CREATE ORDER
-  // FIX #1 & #2: Guard on bookingStatus + financialStatus idempotency
+  // RAZORPAY PAYMENT
   // ─────────────────────────────────────────────────────────────────────
 
   /**
-   * Step 1 of payment: Creates a Razorpay order and returns order details
-   * to the frontend so the user can complete the checkout flow.
+   * Step 1: create (or reuse) the Razorpay order for this booking. The order id
+   * and amount are stored on the booking; only this order can fund it.
    */
   static async createPaymentOrder(bookingId: string, userId: string) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: { seeker: true },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.seekerId) {
-      throw new Error("Only the renter can initiate payment");
+    const business = await requireBusiness(userId);
+    const booking = await prisma.bookingRequest.findUnique({ where: { id: bookingId } });
+    if (!booking) throw notFound("Booking not found");
+    if (booking.seekerId !== business.id) throw forbidden("Only the renter can pay for this booking");
+    assertStatus(booking, "BOOKING_ACCEPTED", "The owner must accept the booking before payment");
+    if (booking.financialStatus !== "PENDING_PAYMENT") throw conflict("Escrow has already been funded for this booking");
+    if (booking.paymentDeadline && booking.paymentDeadline <= new Date()) {
+      throw conflict("The payment deadline for this booking has passed");
     }
 
-    // FIX #2: Must be in BOOKING_ACCEPTED state
-    if (booking.bookingStatus !== "BOOKING_ACCEPTED") {
-      throw new Error("Booking must be accepted by the owner before payment");
-    }
-
-    // FIX #1: Idempotency — do not allow double-payment
-    if (booking.financialStatus !== "PENDING_PAYMENT") {
-      throw new Error("Escrow has already been funded for this booking");
-    }
-
-    const orderDetails = await RazorpayService.createOrder(
-      booking.totalAmountPaise,
-      bookingId
-    );
-
-    return {
-      ...orderDetails,
+    const breakdown = {
       bookingId,
-      totalAmountPaise: booking.totalAmountPaise,
-      rentAmountPaise:  booking.rentAmountPaise,
+      totalAmountPaise:     booking.totalAmountPaise,
+      rentAmountPaise:      booking.rentAmountPaise,
       securityDepositPaise: booking.securityDepositPaise,
-      transportFeePaise: booking.transportFeePaise,
+      transportFeePaise:    booking.transportFeePaise,
+      paymentDeadline:      booking.paymentDeadline,
     };
+
+    // A previous checkout may already have succeeded without reaching /verify
+    if (booking.razorpayOrderId && (await this.reconcilePayment(bookingId))) {
+      throw conflict("This booking is already paid. Escrow is funded.", "ALREADY_PAID");
+    }
+
+    if (booking.razorpayOrderId && booking.razorpayOrderAmountPaise === booking.totalAmountPaise) {
+      return {
+        orderId: booking.razorpayOrderId,
+        amount: booking.razorpayOrderAmountPaise,
+        currency: "INR",
+        keyId: RazorpayService.keyId(),
+        ...breakdown,
+      };
+    }
+
+    const order = await RazorpayService.createOrder(booking.totalAmountPaise, bookingId);
+    await prisma.bookingRequest.update({
+      where: { id: bookingId },
+      data: { razorpayOrderId: order.orderId, razorpayOrderAmountPaise: order.amount },
+    });
+    return { ...order, ...breakdown };
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // RAZORPAY PAYMENT — VERIFY & FUND ESCROW
-  // FIX #1: Double-call guard via financialStatus check inside transaction
-  // ─────────────────────────────────────────────────────────────────────
-
   /**
-   * Step 2 of payment: Verify Razorpay signature, then atomically
-   * mark escrow as funded and record the payment transaction.
+   * Step 2: verify the checkout result against Razorpay itself, then fund escrow.
+   * If the booking was cancelled or expired while the renter was paying, the
+   * captured payment is recorded and refunded in full.
    */
   static async verifyAndFundEscrow(
     bookingId: string,
@@ -601,944 +767,796 @@ export class BookingService {
     razorpayPaymentId: string,
     razorpaySignature: string
   ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: { seeker: true },
-    });
-    if (!booking) throw new Error("Booking not found");
+    const business = await requireBusiness(userId);
+    const booking = await prisma.bookingRequest.findUnique({ where: { id: bookingId } });
+    if (!booking) throw notFound("Booking not found");
+    if (booking.seekerId !== business.id) throw forbidden("Only the renter can verify payment");
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.seekerId) {
-      throw new Error("Only the renter can verify payment");
+    if (booking.razorpayPaymentId === razorpayPaymentId) return forViewer(booking, business.id); // already verified
+    if (!booking.razorpayOrderId || booking.razorpayOrderId !== razorpayOrderId) {
+      throw badRequest("This payment does not belong to this booking's order", "PAYMENT_ORDER_MISMATCH");
+    }
+    if (!RazorpayService.verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
+      throw badRequest("Payment verification failed: invalid signature", "PAYMENT_SIGNATURE_INVALID");
     }
 
-    // FIX #1 & #2: State guards
-    if (booking.bookingStatus !== "BOOKING_ACCEPTED") {
-      throw new Error("Booking must be in BOOKING_ACCEPTED status to verify payment");
+    let payment = await RazorpayService.fetchPayment(razorpayPaymentId);
+    const expectedAmount = booking.razorpayOrderAmountPaise!;
+    if (payment.order_id !== razorpayOrderId || Number(payment.amount) !== expectedAmount || payment.currency !== "INR") {
+      throw badRequest("Payment amount or order does not match this booking", "PAYMENT_MISMATCH");
     }
-    if (booking.financialStatus !== "PENDING_PAYMENT") {
-      throw new Error("Escrow has already been funded for this booking");
+    if (payment.status === "authorized") {
+      payment = await RazorpayService.capturePayment(razorpayPaymentId, expectedAmount);
     }
-
-    // Verify Razorpay HMAC signature
-    const isValid = RazorpayService.verifySignature(
-      razorpayOrderId,
-      razorpayPaymentId,
-      razorpaySignature
-    );
-    if (!isValid) {
-      throw new Error("Payment verification failed: invalid signature");
+    if (payment.status !== "captured") {
+      throw badRequest(`Payment is not complete (status: ${payment.status})`, "PAYMENT_NOT_CAPTURED");
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      // Double-check inside transaction to prevent concurrent re-payment (#1)
-      const fresh = await tx.bookingRequest.findUnique({
-        where: { id: bookingId },
-        select: { financialStatus: true },
-      });
-      if (fresh?.financialStatus !== "PENDING_PAYMENT") {
-        throw new Error("Escrow has already been funded for this booking");
+    const outcome = await this.applyCapturedPayment(bookingId, business.id, razorpayOrderId, razorpayPaymentId, expectedAmount);
+    if (!outcome.funded) {
+      throw conflict("This booking is no longer payable. Your payment has been refunded in full.", "BOOKING_NOT_PAYABLE");
+    }
+    return forViewer(outcome.booking, business.id);
+  }
+
+  /**
+   * Record a captured payment of this booking's order. Funds escrow if the
+   * booking is still payable; otherwise (cancelled / expired meanwhile) the
+   * payment is recorded and refunded in full.
+   */
+  private static async applyCapturedPayment(
+    bookingId: string,
+    actorBusinessId: string | null,
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+    amountPaise: number
+  ): Promise<{ funded: boolean; booking: BookingRequest }> {
+    return this.inBookingTx(bookingId, async (tx, fresh) => {
+      if (fresh.razorpayPaymentId) {
+        if (fresh.razorpayPaymentId === razorpayPaymentId) {
+          return { funded: fresh.financialStatus !== "FULLY_REFUNDED", booking: fresh };
+        }
+        throw conflict("Escrow has already been funded for this booking");
       }
 
-      const b = await tx.bookingRequest.update({
-        where: { id: bookingId },
-        data: { financialStatus: "FUNDS_HELD" },
-      });
+      await PaymentService.recordEscrowDeposit(tx, bookingId, amountPaise, razorpayPaymentId);
+      const actorRole: ActorRole = actorBusinessId ? "RENTER" : "SYSTEM";
 
-      await tx.paymentTransaction.create({
+      const payable =
+        fresh.bookingStatus === "BOOKING_ACCEPTED" &&
+        fresh.financialStatus === "PENDING_PAYMENT" &&
+        amountPaise === fresh.totalAmountPaise;
+
+      if (!payable) {
+        // Paid too late (cancelled/expired meanwhile) or for a stale amount: refund it all.
+        await PaymentService.queueRefund(tx, bookingId, "FULL_REFUND", amountPaise);
+        const late = await tx.bookingRequest.update({
+          where: { id: bookingId },
+          data: { razorpayPaymentId, financialStatus: "FULLY_REFUNDED" },
+        });
+        await this.recordTimelineEvent(
+          bookingId, "LATE_PAYMENT_REFUNDED", actorBusinessId, actorRole,
+          "Payment Received After Booking Closed — Refunded",
+          `A payment of ${rupees(amountPaise)} arrived after this booking was no longer payable. It is being refunded in full.`,
+          { razorpayOrderId, razorpayPaymentId }, tx
+        );
+        return { funded: false, booking: late };
+      }
+
+      const now = new Date();
+      const handoverDeadline = handoverDeadlineFor(now, fresh.startDate);
+      const funded = await tx.bookingRequest.update({
+        where: { id: bookingId },
         data: {
-          bookingId,
-          type: "ESCROW_DEPOSIT",
-          amountPaise: booking.totalAmountPaise,
-          status: "COMPLETED",
-          providerReference: razorpayPaymentId,   // stable unique Razorpay payment ID (#18)
+          financialStatus: "FUNDS_HELD",
+          razorpayPaymentId,
+          fundedAt: now,
+          handoverDeadline,
+          handoverCode: generateHandoverCode(),
+          handoverCodeAttempts: 0,
         },
       });
-
-      return b;
+      await this.recordTimelineEvent(
+        bookingId, "ESCROW_FUNDED", actorBusinessId, actorRole,
+        "Escrow Funded via Razorpay",
+        `${rupees(fresh.totalAmountPaise)} (Rent: ${rupees(fresh.rentAmountPaise)} + Deposit: ${rupees(fresh.securityDepositPaise)}${fresh.transportFeePaise > 0 ? ` + Transport: ${rupees(fresh.transportFeePaise)}` : ""}) held in platform escrow. The owner must hand over by ${handoverDeadline.toISOString()}. Razorpay Payment ID: ${razorpayPaymentId}`,
+        { razorpayOrderId, razorpayPaymentId }, tx
+      );
+      return { funded: true, booking: funded };
     });
+  }
 
-    await this.recordTimelineEvent(
-      bookingId,
-      "ESCROW_FUNDED",
-      business.id,
-      "RENTER",
-      "Escrow Funded via Razorpay",
-      `₹${(booking.totalAmountPaise / 100).toLocaleString()} (Rent: ₹${(booking.rentAmountPaise / 100).toLocaleString()} + Deposit: ₹${(booking.securityDepositPaise / 100).toLocaleString()}${booking.transportFeePaise > 0 ? ` + Transport: ₹${(booking.transportFeePaise / 100).toLocaleString()}` : ""}) safely held in platform escrow. Razorpay Payment ID: ${razorpayPaymentId}`,
-      { razorpayOrderId, razorpayPaymentId }
+  /**
+   * Recover a payment whose verify call never arrived (e.g. the renter closed
+   * the tab right after paying): look the booking's order up on Razorpay and
+   * apply any successful payment. Returns true if a payment was applied.
+   */
+  static async reconcilePayment(bookingId: string): Promise<boolean> {
+    const booking = await prisma.bookingRequest.findUnique({ where: { id: bookingId } });
+    if (!booking?.razorpayOrderId || booking.razorpayPaymentId || !booking.razorpayOrderAmountPaise) return false;
+
+    const attempts = await RazorpayService.fetchOrderPayments(booking.razorpayOrderId);
+    const paid = attempts.find(
+      (p) => ["captured", "authorized"].includes(p.status) && Number(p.amount) === booking.razorpayOrderAmountPaise
     );
+    if (!paid) return false;
+    if (paid.status === "authorized") await RazorpayService.capturePayment(paid.id, booking.razorpayOrderAmountPaise);
 
-    return updated;
+    await this.applyCapturedPayment(bookingId, null, booking.razorpayOrderId, paid.id, booking.razorpayOrderAmountPaise);
+    return true;
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // HANDOVER — Owner marks resource handed over
-  // FIX #3: Checks bookingStatus === BOOKING_ACCEPTED AND financialStatus === FUNDS_HELD
+  // HANDOVER — owner enters the renter's code and uploads condition photos
   // ─────────────────────────────────────────────────────────────────────
 
-  static async markHandover(bookingId: string, userId: string) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: { provider: true },
+  static async markHandover(bookingId: string, userId: string, input: HandoverInput) {
+    const business = await requireBusiness(userId);
+
+    const result = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the resource owner can mark handover");
+      assertStatus(booking, "BOOKING_ACCEPTED", "Booking must be accepted and funded before handover");
+      if (booking.financialStatus !== "FUNDS_HELD") throw conflict("Escrow must be funded before the resource can be handed over");
+
+      const now = new Date();
+      if (now < handoverOpensAt(booking.startDate)) {
+        throw conflict(`Handover opens 1 day before the start date (from ${handoverOpensAt(booking.startDate).toISOString()})`);
+      }
+      if (booking.handoverDeadline && now > booking.handoverDeadline) {
+        throw conflict("The handover deadline has passed");
+      }
+      if (booking.handoverCodeAttempts >= MAX_HANDOVER_CODE_ATTEMPTS || !booking.handoverCode) {
+        throw new HttpError(423, "HANDOVER_CODE_LOCKED", "Handover code locked after too many wrong attempts. Please contact support.");
+      }
+
+      if (!safeEqual(input.handoverCode, booking.handoverCode)) {
+        const attempts = booking.handoverCodeAttempts + 1;
+        await tx.bookingRequest.update({ where: { id: bookingId }, data: { handoverCodeAttempts: attempts } });
+        // Commit the attempt count, then report the error.
+        return { ok: false as const, remaining: MAX_HANDOVER_CODE_ATTEMPTS - attempts };
+      }
+
+      const inspection = await tx.inspection.create({
+        data: {
+          bookingId,
+          type: "HANDOVER",
+          performedById: business.id,
+          status: "ACCEPTED",
+          quantity: booking.quantity,
+          notes: input.notes || "Condition recorded by owner at handover.",
+        },
+      });
+      for (const url of input.evidenceUrls) {
+        await tx.evidence.create({
+          data: { bookingId, inspectionId: inspection.id, uploadedById: business.id, stage: "HANDOVER", fileUrl: url, notes: input.notes },
+        });
+      }
+
+      const deadline = addMs(now, RENTER_INSPECTION_MS);
+      const updated = await tx.bookingRequest.update({
+        where: { id: bookingId },
+        data: {
+          handoverInitiatedAt:      now,
+          renterInspectionDeadline: deadline,
+          bookingStatus: "HANDOVER_INSPECTION",
+          status: "handover",
+          handoverCode: null,
+        },
+      });
+      await this.recordTimelineEvent(
+        bookingId, "HANDOVER_MARKED", business.id, "OWNER",
+        "Handover Verified with Renter's Code",
+        `Owner entered the renter's handover code and recorded ${input.evidenceUrls.length} condition photo(s). The renter has 1 hour (until ${deadline.toISOString()}) to inspect and accept or report an issue.`,
+        null, tx
+      );
+      return { ok: true as const, booking: updated };
     });
-    if (!booking) throw new Error("Booking not found");
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.providerId) {
-      throw new Error("Only the resource owner can mark handover");
+    if (!result.ok) {
+      throw badRequest(
+        result.remaining > 0
+          ? `Incorrect handover code. ${result.remaining} attempt(s) left.`
+          : "Incorrect handover code. The code is now locked; please contact support.",
+        "HANDOVER_CODE_INVALID"
+      );
     }
-
-    // FIX #3
-    if (booking.bookingStatus !== "BOOKING_ACCEPTED") {
-      throw new Error("Booking must be in BOOKING_ACCEPTED status before handover");
-    }
-    if (booking.financialStatus !== "FUNDS_HELD") {
-      throw new Error("Escrow must be funded before the resource can be handed over");
-    }
-
-    const now      = new Date();
-    const deadline = new Date(now.getTime() + 60 * 60 * 1000); // +1 hour
-
-    const updated = await prisma.bookingRequest.update({
-      where: { id: bookingId },
-      data: {
-        handoverInitiatedAt:     now,
-        renterInspectionDeadline: deadline,
-        bookingStatus: "HANDOVER_INSPECTION",
-        // FIX #20: Keep legacy status in sync
-        status: "active",
-      },
-    });
-
-    await this.recordTimelineEvent(
-      bookingId,
-      "HANDOVER_MARKED",
-      business.id,
-      "OWNER",
-      "Resource Handed Over (Inspection Window Started)",
-      `Physical transfer initiated. Renter has 1 hour (until ${deadline.toLocaleTimeString()}) to inspect condition and accept or report critical discrepancies.`
-    );
-
-    return updated;
+    return forViewer(result.booking, business.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────
   // RENTER RECEIVING INSPECTION
-  // FIX #4: Enforces renterInspectionDeadline
   // ─────────────────────────────────────────────────────────────────────
 
-  static async renterReceivingInspection(
-    bookingId: string,
-    userId: string,
-    input: RenterReceivingInspectionInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: { seeker: true },
-    });
-    if (!booking) throw new Error("Booking not found");
+  static async renterReceivingInspection(bookingId: string, userId: string, input: RenterReceivingInspectionInput) {
+    const business = await requireBusiness(userId);
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.seekerId) {
-      throw new Error("Only the renter can perform receiving inspection");
-    }
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.seekerId !== business.id) throw forbidden("Only the renter can perform the receiving inspection");
+      assertStatus(booking, "HANDOVER_INSPECTION", "Booking is not awaiting your receiving inspection");
 
-    if (booking.bookingStatus !== "HANDOVER_INSPECTION") {
-      throw new Error("Booking is not in HANDOVER_INSPECTION status");
-    }
+      const now = new Date();
+      if (booking.renterInspectionDeadline && now > booking.renterInspectionDeadline) {
+        throw conflict("Your inspection window has expired. The booking was auto-accepted.");
+      }
 
-    // FIX #4: Deadline enforcement
-    const now = new Date();
-    if (booking.renterInspectionDeadline && now > booking.renterInspectionDeadline) {
-      throw new Error(
-        "Renter inspection window has expired. The booking was auto-accepted by the system."
-      );
-    }
+      const receivedQuantity = input.receivedQuantity ?? booking.quantity;
+      if (receivedQuantity > booking.quantity) {
+        throw badRequest(`Received quantity cannot exceed the booked quantity (${booking.quantity})`);
+      }
 
-    if (input.status === "ACCEPTED") {
-      const updated = await prisma.$transaction(async (tx) => {
-        const inspection = await tx.inspection.create({
+      const inspection = await tx.inspection.create({
+        data: {
+          bookingId,
+          type: "RECEIVING",
+          performedById: business.id,
+          status: input.status,
+          quantity: receivedQuantity,
+          notes: input.status === "ACCEPTED"
+            ? input.notes || "Condition accepted by renter."
+            : input.issueDescription!,
+        },
+      });
+      for (const url of input.evidenceUrls) {
+        await tx.evidence.create({
           data: {
-            bookingId,
-            type: "RECEIVING",
-            performedById: business.id,
-            status: "ACCEPTED",
-            quantity: booking.quantity,
-            notes: input.notes || "Condition accepted by renter.",
+            bookingId, inspectionId: inspection.id, uploadedById: business.id,
+            stage: "RECEIVING", fileUrl: url, notes: input.issueDescription ?? input.notes,
           },
         });
+      }
 
-        if (input.evidenceUrls?.length) {
-          for (const url of input.evidenceUrls) {
-            await tx.evidence.create({
-              data: {
-                bookingId,
-                inspectionId: inspection.id,
-                uploadedById: business.id,
-                stage: "RECEIVING",
-                fileUrl: url,
-              },
-            });
-          }
+      if (input.status === "ACCEPTED") {
+        if (receivedQuantity < booking.quantity) {
+          throw badRequest(
+            `You received ${receivedQuantity} of ${booking.quantity} unit(s). Report an issue instead of accepting a short delivery.`
+          );
         }
-
+        const { ownerPaise } = await this.releaseRent(tx, booking);
         const b = await tx.bookingRequest.update({
           where: { id: bookingId },
-          data: {
-            bookingStatus:   "ACTIVE",
-            financialStatus: "RENT_RELEASED",
-            status:          "active",   // FIX #20
-          },
+          data: { bookingStatus: "ACTIVE", financialStatus: "RENT_RELEASED", status: "active", receivedQuantity },
         });
-
-        await tx.paymentTransaction.create({
-          data: {
-            bookingId,
-            type: "RENT_PAYOUT",
-            amountPaise: booking.rentAmountPaise + booking.transportFeePaise, // transport fee is paid out with rent
-            status: "COMPLETED",
-            providerReference: `RENT_RELEASE_${bookingId}`,   // stable (#18)
-          },
-        });
-
+        await this.recordTimelineEvent(
+          bookingId, "RECEIVING_ACCEPTED", business.id, "RENTER",
+          "Resource Accepted by Renter",
+          `Renter confirmed receipt of all ${receivedQuantity} unit(s) in acceptable condition. ${rupees(ownerPaise)} (rent${booking.transportFeePaise > 0 ? " + transport" : ""}) queued for payout to the owner; the deposit (${rupees(booking.securityDepositPaise)}) stays in escrow.`,
+          null, tx
+        );
         return b;
+      }
+
+      // REPORTED_ISSUE → the owner must respond within 24h
+      const responseDeadline = addMs(now, HANDOVER_ISSUE_RESPONSE_MS);
+      await tx.dispute.create({
+        data: {
+          bookingId,
+          kind: "HANDOVER_ISSUE",
+          raisedByRole: "RENTER",
+          status: "OPEN",
+          responseDeadline,
+          renterReason: receivedQuantity < booking.quantity ? "MISSING_QUANTITY" : "CONDITION_MISMATCH",
+          renterResponse: input.issueDescription,
+        },
       });
-
-      await this.recordTimelineEvent(
-        bookingId, "RECEIVING_ACCEPTED", business.id, "RENTER",
-        "Resource Accepted by Renter",
-        `Renter confirmed physical receipt and acceptable condition. Rent (₹${(booking.rentAmountPaise / 100).toLocaleString()})${booking.transportFeePaise > 0 ? ` and transport fee (₹${(booking.transportFeePaise / 100).toLocaleString()})` : ""} disbursed to owner; Security Deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) remains safely held in escrow.`
-      );
-
-      return updated;
-
-    } else {
-      // REPORTED_ISSUE → DISPUTED
-      const updated = await prisma.$transaction(async (tx) => {
-        const inspection = await tx.inspection.create({
-          data: {
-            bookingId,
-            type: "RECEIVING",
-            performedById: business.id,
-            status: "REPORTED_ISSUE",
-            quantity: booking.quantity,
-            notes: input.issueDescription || input.notes || "Defect reported during handover.",
-          },
-        });
-
-        if (input.evidenceUrls?.length) {
-          for (const url of input.evidenceUrls) {
-            await tx.evidence.create({
-              data: {
-                bookingId,
-                inspectionId: inspection.id,
-                uploadedById: business.id,
-                stage: "RECEIVING",
-                fileUrl: url,
-                notes: input.issueDescription,
-              },
-            });
-          }
-        }
-
-        const claim = await tx.damageClaim.create({
-          data: {
-            bookingId,
-            claimantId: business.id,
-            claimType: "DAMAGE",
-            description: input.issueDescription || "Disclosed condition mismatch during receiving inspection",
-            claimedAmountPaise: booking.totalAmountPaise,
-            status: "DISPUTED",
-          },
-        });
-
-        await tx.dispute.create({
-          data: {
-            bookingId,
-            damageClaimId: claim.id,
-            status: "OPEN",
-            renterReason: "PRE_EXISTING_DAMAGE",
-            renterResponse: input.issueDescription,
-          },
-        });
-
-        return tx.bookingRequest.update({
-          where: { id: bookingId },
-          data: {
-            bookingStatus: "DISPUTED",
-            status: "disputed",   // FIX #20
-          },
-        });
+      const b = await tx.bookingRequest.update({
+        where: { id: bookingId },
+        data: { bookingStatus: "DISPUTED", status: "disputed", receivedQuantity },
       });
-
       await this.recordTimelineEvent(
         bookingId, "RECEIVING_ISSUE", business.id, "RENTER",
-        "Critical Handover Issue Reported",
-        `Renter reported severe discrepancy or defects during receiving inspection: "${input.issueDescription}". Booking entered dispute; platform escrow frozen.`
+        "Handover Issue Reported",
+        `Renter received ${receivedQuantity} of ${booking.quantity} unit(s) and reported: "${input.issueDescription}". The whole payment stays in escrow. The owner has until ${responseDeadline.toISOString()} to accept (full refund) or contest (goes to admin).`,
+        null, tx
       );
+      return b;
+    });
+    return forViewer(updated, business.id);
+  }
 
-      return updated;
+  /** Owner accepts (renter refunded in full) or contests (escalated to admin) a handover issue. */
+  static async ownerRespondHandoverIssue(bookingId: string, userId: string, input: OwnerHandoverResponseInput) {
+    const business = await requireBusiness(userId);
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the owner can respond to a handover issue");
+      assertStatus(booking, "DISPUTED", "There is no open handover issue on this booking");
+      const dispute = await this.latestDispute(tx, bookingId);
+      if (dispute?.kind !== "HANDOVER_ISSUE" || dispute.status !== "OPEN") {
+        throw conflict("There is no handover issue awaiting your response");
+      }
+
+      if (input.action === "ACCEPT") {
+        return this.resolveHandoverIssue(
+          tx, booking, dispute.id, "FULL_REFUND", 0,
+          input.notes || "Owner accepted the renter's handover issue.", business.id, "OWNER"
+        );
+      }
+
+      await tx.dispute.update({
+        where: { id: dispute.id },
+        data: { status: "ESCALATED", escalatedAt: new Date(), ownerResponse: input.notes },
+      });
+      await this.recordTimelineEvent(
+        bookingId, "HANDOVER_ISSUE_CONTESTED", business.id, "OWNER",
+        "Owner Contested the Handover Issue",
+        `Owner's response: "${input.notes}". Sent to HostNexus admin for a decision; escrow stays frozen.`,
+        null, tx
+      );
+      return tx.bookingRequest.findUniqueOrThrow({ where: { id: bookingId } });
+    });
+    return forViewer(updated, business.id);
+  }
+
+  /**
+   * Settle a handover issue.
+   *  FULL_REFUND    → everything back to the renter, booking cancelled.
+   *  REJECT_ISSUE   → rent + transport to the owner, booking ACTIVE, deposit held.
+   *  PARTIAL_REFUND → `amount` of rent + transport back to the renter, rest to the owner, booking ACTIVE.
+   */
+  private static async resolveHandoverIssue(
+    tx: Tx,
+    booking: BookingRequest,
+    disputeId: string,
+    decision: "FULL_REFUND" | "REJECT_ISSUE" | "PARTIAL_REFUND",
+    amountPaise: number,
+    notes: string,
+    actorId: string | null,
+    actorRole: ActorRole
+  ) {
+    const now = new Date();
+    let updated: BookingRequest;
+    let summary: string;
+
+    if (decision === "FULL_REFUND") {
+      const { heldPaise } = await PaymentService.ledger(tx, booking.id);
+      await PaymentService.queueRefund(tx, booking.id, "FULL_REFUND", heldPaise);
+      updated = await tx.bookingRequest.update({
+        where: { id: booking.id },
+        data: {
+          bookingStatus: "CANCELLED", financialStatus: "FULLY_REFUNDED", status: "cancelled",
+          cancelledAt: now, cancelledBy: "SYSTEM", rejectionReason: "Handover issue upheld",
+        },
+      });
+      summary = `${rupees(heldPaise)} is being refunded to the renter in full; the owner collects the item back.`;
+    } else {
+      const { ownerPaise, refundPaise } = await this.releaseRent(tx, booking, decision === "PARTIAL_REFUND" ? amountPaise : 0);
+      updated = await tx.bookingRequest.update({
+        where: { id: booking.id },
+        data: { bookingStatus: "ACTIVE", financialStatus: "RENT_RELEASED", status: "active" },
+      });
+      summary = refundPaise > 0
+        ? `${rupees(refundPaise)} refunded to the renter, ${rupees(ownerPaise)} queued for payout to the owner. The rental continues; the deposit stays in escrow.`
+        : `${rupees(ownerPaise)} queued for payout to the owner. The rental continues; the deposit stays in escrow.`;
     }
+
+    await tx.dispute.update({
+      where: { id: disputeId },
+      data: {
+        status: "RESOLVED",
+        adminDecision: decision,
+        resolutionAmountPaise: decision === "PARTIAL_REFUND" ? amountPaise : null,
+        resolutionNotes: notes,
+        resolvedById: actorId,
+        resolvedAt: now,
+      },
+    });
+    await this.recordTimelineEvent(
+      booking.id, "DISPUTE_RESOLVED", actorId, actorRole,
+      `Handover Issue Resolved (${decision})`, `${notes} ${summary}`, null, tx
+    );
+    return updated;
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // RETURN — Renter initiates return
-  // FIX #11: Adds note if return is before endDate (early return awareness)
+  // RETURN
   // ─────────────────────────────────────────────────────────────────────
 
-  static async initiateReturn(
-    bookingId: string,
-    userId: string,
-    input: ReturnInitiationInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-    });
-    if (!booking) throw new Error("Booking not found");
+  static async initiateReturn(bookingId: string, userId: string, input: ReturnInitiationInput) {
+    const business = await requireBusiness(userId);
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.seekerId) {
-      throw new Error("Only the renter can mark resource returned");
-    }
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.seekerId !== business.id) throw forbidden("Only the renter can return the resource");
+      assertStatus(booking, "ACTIVE", "Booking must be active to start a return");
 
-    if (booking.bookingStatus !== "ACTIVE") {
-      throw new Error("Booking must be in ACTIVE status to initiate return");
-    }
+      const returnedQuantity = input.returnedQuantity ?? booking.quantity;
+      if (returnedQuantity > booking.quantity) {
+        throw badRequest(`Returned quantity cannot exceed the booked quantity (${booking.quantity})`);
+      }
 
-    const now = new Date();
-    const isEarlyReturn = now < booking.endDate;
+      const now = new Date();
+      const isEarlyReturn = now < istDayEnd(booking.endDate);
 
-    const updated = await prisma.$transaction(async (tx) => {
       const inspection = await tx.inspection.create({
         data: {
           bookingId,
           type: "RETURN",
           performedById: business.id,
           status: "ACCEPTED",
-          quantity: booking.quantity,
+          quantity: returnedQuantity,
           notes: input.notes || "Return evidence submitted by renter.",
         },
       });
-
-      if (input.returnEvidenceUrls?.length) {
-        for (const url of input.returnEvidenceUrls) {
-          await tx.evidence.create({
-            data: {
-              bookingId,
-              inspectionId: inspection.id,
-              uploadedById: business.id,
-              stage: "RETURN",
-              fileUrl: url,
-            },
-          });
-        }
+      for (const url of input.returnEvidenceUrls) {
+        await tx.evidence.create({
+          data: { bookingId, inspectionId: inspection.id, uploadedById: business.id, stage: "RETURN", fileUrl: url, notes: input.notes },
+        });
       }
 
-      return tx.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          returnInitiatedAt: now,
-          bookingStatus: "RETURN_INITIATED",
-          status: "return_initiated",   // FIX #20
-        },
-      });
-    });
-
-    await this.recordTimelineEvent(
-      bookingId, "RETURN_INITIATED", business.id, "RENTER",
-      isEarlyReturn ? "Early Return Initiated" : "Resource Return Initiated",
-      isEarlyReturn
-        ? `Renter marked early return (before agreed end date ${booking.endDate.toLocaleDateString()}). Evidence uploaded. Awaiting owner confirmation.`
-        : "Renter marked resources returned and uploaded return condition evidence. Awaiting owner confirmation of physical receipt."
-    );
-
-    return updated;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // OWNER CONFIRMS RECEIPT (Fake Return Protection)
-  // FIX #10: Guard on bookingStatus === RETURN_INITIATED
-  // FIX #12: Sets bookingStatus to DISPUTED (not RETURN_NOT_RECEIVED) so
-  //          adminResolveDispute can handle it uniformly
-  // ─────────────────────────────────────────────────────────────────────
-
-  static async ownerConfirmReceipt(
-    bookingId: string,
-    userId: string,
-    input: OwnerReceiptInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.providerId) {
-      throw new Error("Only the resource owner can confirm return receipt");
-    }
-
-    // FIX #10: State guard
-    if (booking.bookingStatus !== "RETURN_INITIATED") {
-      throw new Error("Return must be initiated by the renter before owner can confirm receipt");
-    }
-
-    const now = new Date();
-
-    if (input.received) {
-      const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000); // +2 hours
-      const updated = await prisma.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          ownerReceivedAt:         now,
-          ownerInspectionDeadline: deadline,
-          bookingStatus:           "OWNER_INSPECTION",
-          status:                  "owner_inspection",   // FIX #20
-        },
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "OWNER_RECEIPT_CONFIRMED", business.id, "OWNER",
-        "Physical Receipt Confirmed (2-Hour Window Started)",
-        `Owner confirmed physical receipt of returned items. 2-hour inspection window active until ${deadline.toLocaleTimeString()}. If no damage is reported, the security deposit of ₹${(booking.securityDepositPaise / 100).toLocaleString()} will be automatically refunded.`
-      );
-
-      return updated;
-
-    } else {
-      // FIX #12: Fake return — transition to DISPUTED (not RETURN_NOT_RECEIVED)
-      // so admin can resolve it uniformly via adminResolveDispute
-      const updated = await prisma.$transaction(async (tx) => {
-        const claim = await tx.damageClaim.create({
-          data: {
-            bookingId,
-            claimantId: business.id,
-            claimType: "RETURN_NOT_RECEIVED",
-            description: input.notes || "Owner reported that physical resource was not received.",
-            claimedAmountPaise: booking.securityDepositPaise,
-            status: "DISPUTED",
-          },
-        });
-
-        await tx.dispute.create({
-          data: {
-            bookingId,
-            damageClaimId: claim.id,
-            status: "OPEN",
-          },
-        });
-
-        return tx.bookingRequest.update({
-          where: { id: bookingId },
-          data: {
-            bookingStatus: "DISPUTED",   // FIX #12 — was RETURN_NOT_RECEIVED
-            status: "disputed",
-            nonReturnReportedAt: now,
-          },
-        });
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "RETURN_NOT_RECEIVED", business.id, "OWNER",
-        "Return Not Received (Dispute Filed)",
-        "Owner reported resources were NOT received despite renter's return claim. Booking entered DISPUTED status and sent to Customer Care."
-      );
-
-      return updated;
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // OWNER ACCEPTS RETURN — Everything OK → deposit refunded, completed
-  // FIX #6: Guard on bookingStatus === OWNER_INSPECTION
-  // ─────────────────────────────────────────────────────────────────────
-
-  static async ownerAcceptReturn(
-    bookingId: string,
-    userId: string,
-    _notes?: string
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.providerId) {
-      throw new Error("Only the owner can accept return condition");
-    }
-
-    // FIX #6: State guard
-    if (booking.bookingStatus !== "OWNER_INSPECTION") {
-      throw new Error(
-        "Return condition can only be accepted during the OWNER_INSPECTION window"
-      );
-    }
-
-    const now = new Date();
-    const updated = await prisma.$transaction(async (tx) => {
+      const receiptDeadline = addMs(now, OWNER_RECEIPT_WINDOW_MS);
       const b = await tx.bookingRequest.update({
         where: { id: bookingId },
         data: {
-          bookingStatus:   "COMPLETED",
-          financialStatus: "DEPOSIT_REFUNDED",
-          completedAt:     now,
-          status:          "completed",   // FIX #20
+          returnInitiatedAt: now,
+          returnedQuantity,
+          ownerReceiptDeadline: receiptDeadline,
+          bookingStatus: "RETURN_INITIATED",
+          status: "return_initiated",
         },
       });
-
-      await tx.paymentTransaction.create({
-        data: {
-          bookingId,
-          type: "DEPOSIT_REFUND",
-          amountPaise: booking.securityDepositPaise,
-          status: "COMPLETED",
-          providerReference: `REFUND_OK_${bookingId}`,   // stable (#18)
-        },
-      });
-
+      await this.recordTimelineEvent(
+        bookingId, "RETURN_INITIATED", business.id, "RENTER",
+        isEarlyReturn ? "Early Return Initiated" : "Resource Return Initiated",
+        `Renter returned ${returnedQuantity} of ${booking.quantity} unit(s)${isEarlyReturn ? " before the last rental day" : ""} and uploaded ${input.returnEvidenceUrls.length} photo(s). The owner has until ${receiptDeadline.toISOString()} to confirm receipt, after which it is confirmed automatically.`,
+        null, tx
+      );
       return b;
     });
-
-    await this.recordTimelineEvent(
-      bookingId, "OWNER_RETURN_ACCEPTED", business.id, "OWNER",
-      "Return Accepted & Deposit Released",
-      `Owner confirmed pristine condition. Security deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) refunded to renter. Rental transaction complete.`
-    );
-
-    return updated;
+    return forViewer(updated, business.id);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // OWNER SUBMITS DAMAGE CLAIM
-  // FIX #5: Guard on bookingStatus === OWNER_INSPECTION + deadline check
-  // FIX #15: Validate claimedAmountPaise <= securityDepositPaise
-  // ─────────────────────────────────────────────────────────────────────
+  /** Owner confirms physical receipt (with a count) or reports that nothing arrived. */
+  static async ownerConfirmReceipt(bookingId: string, userId: string, input: OwnerReceiptInput) {
+    const business = await requireBusiness(userId);
 
-  static async ownerSubmitDamageClaim(
-    bookingId: string,
-    userId: string,
-    input: OwnerDamageClaimInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-    });
-    if (!booking) throw new Error("Booking not found");
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the resource owner can confirm return receipt");
+      assertStatus(booking, "RETURN_INITIATED", "The renter must start the return before you can confirm receipt");
 
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.providerId) {
-      throw new Error("Only the resource owner can submit damage claims");
-    }
+      const now = new Date();
 
-    // FIX #5: State guard
-    if (booking.bookingStatus !== "OWNER_INSPECTION") {
-      throw new Error(
-        "Damage claims can only be submitted during the OWNER_INSPECTION window"
-      );
-    }
-
-    // FIX #5: Deadline enforcement
-    if (booking.ownerInspectionDeadline && new Date() > booking.ownerInspectionDeadline) {
-      throw new Error("Owner inspection window has expired. No damage claim can be submitted.");
-    }
-
-    // FIX #15: Claimed amount cannot exceed deposit
-    if (input.claimedAmountPaise > booking.securityDepositPaise) {
-      throw new Error(
-        `Claimed amount (₹${(input.claimedAmountPaise / 100).toLocaleString()}) cannot exceed the security deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()})`
-      );
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const claim = await tx.damageClaim.create({
-        data: {
-          bookingId,
-          claimantId:        business.id,
-          claimType:         input.claimType,
-          description:       input.description,
-          claimedAmountPaise: input.claimedAmountPaise,
-          status: "PENDING",
-        },
-      });
-
-      for (const url of input.evidenceUrls) {
-        await tx.evidence.create({
+      if (input.received) {
+        const receivedQuantity = input.receivedQuantity ?? booking.returnedQuantity ?? booking.quantity;
+        if (receivedQuantity > booking.quantity) {
+          throw badRequest(`Received quantity cannot exceed the booked quantity (${booking.quantity})`);
+        }
+        await tx.inspection.create({
           data: {
-            bookingId,
-            uploadedById: business.id,
-            stage: "DAMAGE_CLAIM",
-            fileUrl: url,
-            notes: input.description,
+            bookingId, type: "OWNER_RECEIPT", performedById: business.id, status: "ACCEPTED",
+            quantity: receivedQuantity, notes: input.notes || "Owner confirmed physical receipt.",
           },
         });
-      }
-
-      await tx.dispute.create({
-        data: {
-          bookingId,
-          damageClaimId: claim.id,
-          status: "OPEN",
-        },
-      });
-
-      return tx.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          bookingStatus: "DISPUTED",
-          status: "disputed",   // FIX #20
-        },
-      });
-    });
-
-    await this.recordTimelineEvent(
-      bookingId, "DAMAGE_CLAIMED", business.id, "OWNER",
-      "Owner Filed Damage Claim",
-      `Owner filed a claim for ₹${(input.claimedAmountPaise / 100).toLocaleString()} (${input.claimType}): "${input.description}". Deposit held in dispute.`
-    );
-
-    return updated;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // RENTER RESPONDS TO DAMAGE CLAIM
-  // FIX #7: Explicit null guards & correct ordering for claim/dispute fetch
-  // ─────────────────────────────────────────────────────────────────────
-
-  static async renterRespondClaim(
-    bookingId: string,
-    userId: string,
-    input: RenterClaimResponseInput
-  ) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: {
-        damageClaims: { orderBy: { createdAt: "desc" } },   // FIX #7: explicit order
-        disputes:     { orderBy: { createdAt: "desc" } },
-      },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.seekerId) {
-      throw new Error("Only the renter can respond to damage claims");
-    }
-
-    if (booking.bookingStatus !== "DISPUTED") {
-      throw new Error("Booking must be in DISPUTED status to respond to a claim");
-    }
-
-    // FIX #7: Explicit null checks
-    const claim   = booking.damageClaims[0];
-    const dispute = booking.disputes[0];
-
-    if (!claim)   throw new Error("No pending damage claim found for this booking");
-    if (!dispute) throw new Error("No open dispute found for this booking");
-
-    if (input.action === "ACCEPT") {
-      // Renter accepts — settle
-      const payoutToOwner  = Math.min(claim.claimedAmountPaise, booking.securityDepositPaise);
-      const refundToRenter = Math.max(0, booking.securityDepositPaise - payoutToOwner);
-
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.dispute.update({
-          where: { id: dispute.id },
-          data: {
-            status: "RESOLVED",
-            renterResponse: "Accepted by renter",
-            adminDecision: "PAY_OWNER",
-            resolutionAmountPaise: payoutToOwner,
-            resolutionNotes: "Renter accepted claim without dispute.",
-            resolvedAt: new Date(),
-          },
-        });
-
-        await tx.damageClaim.update({
-          where: { id: claim.id },
-          data: { status: "RESOLVED", resolvedAt: new Date() },
-        });
-
-        if (payoutToOwner > 0) {
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId,
-              type: "DAMAGE_PAYOUT",
-              amountPaise: payoutToOwner,
-              status: "COMPLETED",
-              providerReference: `DAMAGE_PAYOUT_${bookingId}`,   // stable (#18)
-            },
-          });
-        }
-
-        if (refundToRenter > 0) {
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId,
-              type: "DEPOSIT_REFUND",
-              amountPaise: refundToRenter,
-              status: "COMPLETED",
-              providerReference: `REM_DEPOSIT_${bookingId}`,   // stable (#18)
-            },
-          });
-        }
-
-        return tx.bookingRequest.update({
+        const deadline = addMs(now, OWNER_INSPECTION_MS);
+        const b = await tx.bookingRequest.update({
           where: { id: bookingId },
           data: {
-            bookingStatus:   "COMPLETED",
-            financialStatus: "PARTIAL_SETTLEMENT",
-            completedAt:     new Date(),
-            status:          "completed",   // FIX #20
+            ownerReceivedAt: now,
+            ownerReceivedQuantity: receivedQuantity,
+            ownerInspectionDeadline: deadline,
+            bookingStatus: "OWNER_INSPECTION",
+            status: "owner_inspection",
           },
         });
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "CLAIM_ACCEPTED", business.id, "RENTER",
-        "Damage Claim Accepted by Renter",
-        `Renter agreed to ₹${(payoutToOwner / 100).toLocaleString()} deduction from deposit. Remaining ₹${(refundToRenter / 100).toLocaleString()} refunded.`
-      );
-
-      return updated;
-
-    } else {
-      // DISPUTE claim — send to admin
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.dispute.update({
-          where: { id: dispute.id },
-          data: {
-            renterResponse: input.rebuttalNotes || null,
-            renterReason:   input.reason || "NOT_CAUSED_BY_RENTER",
-          },
-        });
-
-        if (input.rebuttalEvidenceUrls?.length) {
-          for (const url of input.rebuttalEvidenceUrls) {
-            await tx.evidence.create({
-              data: {
-                bookingId,
-                uploadedById: business.id,
-                stage: "RENTER_REBUTTAL",
-                fileUrl: url,
-                notes: input.rebuttalNotes,
-              },
-            });
-          }
-        }
-
-        return tx.bookingRequest.findUnique({ where: { id: bookingId } });
-      });
-
-      await this.recordTimelineEvent(
-        bookingId, "CLAIM_DISPUTED", business.id, "RENTER",
-        "Renter Disputed Damage Claim",
-        `Renter contested claim (${input.reason || "Disputed"}): "${input.rebuttalNotes || "Condition disputed"}". Sent to Customer Care Panel for review.`
-      );
-
-      return updated;
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // ADMIN RESOLVES DISPUTE
-  // FIX #8: Verifies caller is an actual Admin record in the database
-  // ─────────────────────────────────────────────────────────────────────
-
-  static async adminResolveDispute(
-    bookingId: string,
-    adminUserId: string,
-    input: AdminResolveDisputeInput
-  ) {
-    // FIX #8: Verify admin role — must exist in the admins table
-    const admin = await prisma.admin.findUnique({ where: { id: adminUserId } });
-    if (!admin) {
-      throw new Error("Unauthorized: Admin access required to resolve disputes");
-    }
-
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-      include: {
-        damageClaims: { orderBy: { createdAt: "desc" } },   // FIX #7 consistency
-        disputes:     { orderBy: { createdAt: "desc" } },
-      },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    if (booking.bookingStatus !== "DISPUTED") {
-      throw new Error("Only DISPUTED bookings can be resolved by admin");
-    }
-
-    const dispute = booking.disputes[0];
-    const claim   = booking.damageClaims[0];
-
-    const now = new Date();
-
-    const updated = await prisma.$transaction(async (tx) => {
-      let financialStatus = "PARTIAL_SETTLEMENT";
-      let resolutionAmount = input.resolutionAmountPaise ?? 0;
-
-      if (input.decision === "REFUND_RENTER" || input.decision === "REJECT_CLAIM") {
-        financialStatus  = "DEPOSIT_REFUNDED";
-        resolutionAmount = booking.securityDepositPaise;
-
-        await tx.paymentTransaction.create({
-          data: {
-            bookingId,
-            type: "DEPOSIT_REFUND",
-            amountPaise: booking.securityDepositPaise,
-            status: "COMPLETED",
-            providerReference: `ADMIN_FULL_REFUND_${bookingId}`,   // stable (#18)
-          },
-        });
-
-      } else if (input.decision === "PAY_OWNER") {
-        financialStatus  = "DEPOSIT_TO_OWNER";
-        resolutionAmount = booking.securityDepositPaise;
-
-        await tx.paymentTransaction.create({
-          data: {
-            bookingId,
-            type: "DAMAGE_PAYOUT",
-            amountPaise: booking.securityDepositPaise,
-            status: "COMPLETED",
-            providerReference: `ADMIN_PAY_OWNER_${bookingId}`,   // stable (#18)
-          },
-        });
-
-      } else if (input.decision === "PARTIAL_SETTLEMENT") {
-        financialStatus = "PARTIAL_SETTLEMENT";
-        const ownerShare  = Math.min(resolutionAmount, booking.securityDepositPaise);
-        const renterShare = Math.max(0, booking.securityDepositPaise - ownerShare);
-
-        if (ownerShare > 0) {
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId,
-              type: "DAMAGE_PAYOUT",
-              amountPaise: ownerShare,
-              status: "COMPLETED",
-              providerReference: `ADMIN_PARTIAL_OWNER_${bookingId}`,   // stable (#18)
-            },
-          });
-        }
-        if (renterShare > 0) {
-          await tx.paymentTransaction.create({
-            data: {
-              bookingId,
-              type: "DEPOSIT_REFUND",
-              amountPaise: renterShare,
-              status: "COMPLETED",
-              providerReference: `ADMIN_PARTIAL_RENTER_${bookingId}`,   // stable (#18)
-            },
-          });
-        }
+        await this.recordTimelineEvent(
+          bookingId, "OWNER_RECEIPT_CONFIRMED", business.id, "OWNER",
+          "Physical Receipt Confirmed (2-Hour Window Started)",
+          `Owner confirmed receiving ${receivedQuantity} of ${booking.quantity} unit(s). The owner has until ${deadline.toISOString()} to accept the return or file a claim; otherwise the deposit of ${rupees(booking.securityDepositPaise)} is refunded automatically.`,
+          null, tx
+        );
+        return b;
       }
 
-      if (dispute) {
-        await tx.dispute.update({
-          where: { id: dispute.id },
-          data: {
-            status: "RESOLVED",
-            adminDecision: input.decision,
-            resolutionAmountPaise: resolutionAmount,
-            resolutionNotes: input.resolutionNotes,
-            resolvedById: adminUserId,
-            resolvedAt: now,
-          },
-        });
-      }
-
-      if (claim) {
-        await tx.damageClaim.update({
-          where: { id: claim.id },
-          data: {
-            status: input.decision === "REJECT_CLAIM" ? "REJECTED" : "RESOLVED",
-            resolvedAt: now,
-          },
-        });
-      }
-
-      return tx.bookingRequest.update({
-        where: { id: bookingId },
-        data: {
-          bookingStatus:   "COMPLETED",
-          financialStatus,
-          completedAt:     now,
-          status:          "completed",   // FIX #20
-        },
-      });
-    });
-
-    await this.recordTimelineEvent(
-      bookingId, "DISPUTE_RESOLVED", adminUserId, "ADMIN",
-      `Dispute Resolved by Customer Care (${input.decision})`,
-      `${input.resolutionNotes}. Financial settlement executed.`
-    );
-
-    return updated;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // REPORT NON-RETURN
-  // FIX #9: Guard on bookingStatus === ACTIVE + endDate must have passed
-  // ─────────────────────────────────────────────────────────────────────
-
-  static async reportNonReturn(bookingId: string, userId: string) {
-    const booking = await prisma.bookingRequest.findUnique({
-      where: { id: bookingId },
-    });
-    if (!booking) throw new Error("Booking not found");
-
-    const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business || business.id !== booking.providerId) {
-      throw new Error("Only the owner can report non-return");
-    }
-
-    // FIX #9: State guard
-    if (booking.bookingStatus !== "ACTIVE") {
-      throw new Error("Non-return can only be reported when the booking is ACTIVE");
-    }
-
-    // FIX #9: Cannot report non-return before the rental period has ended
-    if (new Date() < booking.endDate) {
-      throw new Error("Cannot report non-return before the agreed rental end date");
-    }
-
-    const now = new Date();
-    const updated = await prisma.$transaction(async (tx) => {
+      // Fake-return protection: nothing arrived
+      const responseDeadline = addMs(now, RETURN_CLAIM_RESPONSE_MS);
       const claim = await tx.damageClaim.create({
         data: {
           bookingId,
           claimantId: business.id,
-          claimType: "MISSING_ITEM",
-          description: "Owner reported the resource was not returned after the rental period.",
+          claimType: "RETURN_NOT_RECEIVED",
+          description: input.notes || "Owner reported that the returned resource was not received.",
           claimedAmountPaise: booking.securityDepositPaise,
           status: "DISPUTED",
         },
       });
-
       await tx.dispute.create({
+        data: { bookingId, damageClaimId: claim.id, kind: "RETURN_CLAIM", raisedByRole: "OWNER", status: "OPEN", responseDeadline },
+      });
+      const b = await tx.bookingRequest.update({
+        where: { id: bookingId },
+        data: { bookingStatus: "DISPUTED", status: "disputed", nonReturnReportedAt: now, ownerReceivedQuantity: 0 },
+      });
+      await this.recordTimelineEvent(
+        bookingId, "RETURN_NOT_RECEIVED", business.id, "OWNER",
+        "Return Not Received (Claim Filed)",
+        `Owner reported the resource was NOT received despite the renter's return. The renter has until ${responseDeadline.toISOString()} to accept or dispute the claim.`,
+        null, tx
+      );
+      return b;
+    });
+    return forViewer(updated, business.id);
+  }
+
+  /** Owner is satisfied with the return → deposit refunded, booking completed. */
+  static async ownerAcceptReturn(bookingId: string, userId: string, _notes?: string) {
+    const business = await requireBusiness(userId);
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the owner can accept the return");
+      assertStatus(booking, "OWNER_INSPECTION", "The return can only be accepted during your inspection window");
+
+      await this.settleDeposit(tx, booking, 0);
+      const b = await tx.bookingRequest.update({
+        where: { id: bookingId },
+        data: { bookingStatus: "COMPLETED", financialStatus: "DEPOSIT_REFUNDED", completedAt: new Date(), status: "completed" },
+      });
+      await this.recordTimelineEvent(
+        bookingId, "OWNER_RETURN_ACCEPTED", business.id, "OWNER",
+        "Return Accepted & Deposit Released",
+        `Owner accepted the returned condition. The security deposit (${rupees(booking.securityDepositPaise)}) is being refunded to the renter. Rental complete.`,
+        null, tx
+      );
+      return b;
+    });
+    return forViewer(updated, business.id);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // RETURN CLAIMS
+  // ─────────────────────────────────────────────────────────────────────
+
+  static async ownerSubmitDamageClaim(bookingId: string, userId: string, input: OwnerDamageClaimInput) {
+    const business = await requireBusiness(userId);
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the resource owner can submit claims");
+      assertStatus(booking, "OWNER_INSPECTION", "Claims can only be filed during your return inspection window");
+
+      const now = new Date();
+      if (booking.ownerInspectionDeadline && now > booking.ownerInspectionDeadline) {
+        throw conflict("Your inspection window has expired. No claim can be submitted.");
+      }
+      if (input.claimedAmountPaise > booking.securityDepositPaise) {
+        throw badRequest(
+          `Claimed amount (${rupees(input.claimedAmountPaise)}) cannot exceed the security deposit (${rupees(booking.securityDepositPaise)})`
+        );
+      }
+      const receivedQty = booking.ownerReceivedQuantity ?? booking.quantity;
+      if (input.claimType === "MISSING_QUANTITY" && receivedQty >= booking.quantity) {
+        throw badRequest(`You confirmed receiving all ${booking.quantity} unit(s), so a missing-quantity claim isn't possible`);
+      }
+
+      const claim = await tx.damageClaim.create({
         data: {
           bookingId,
-          damageClaimId: claim.id,
-          status: "OPEN",
+          claimantId: business.id,
+          claimType: input.claimType,
+          description: input.description,
+          claimedAmountPaise: input.claimedAmountPaise,
+          status: "PENDING",
         },
       });
-
-      return tx.bookingRequest.update({
+      for (const url of input.evidenceUrls) {
+        await tx.evidence.create({
+          data: { bookingId, uploadedById: business.id, stage: "DAMAGE_CLAIM", fileUrl: url, notes: input.description },
+        });
+      }
+      const responseDeadline = addMs(now, RETURN_CLAIM_RESPONSE_MS);
+      await tx.dispute.create({
+        data: { bookingId, damageClaimId: claim.id, kind: "RETURN_CLAIM", raisedByRole: "OWNER", status: "OPEN", responseDeadline },
+      });
+      const b = await tx.bookingRequest.update({
         where: { id: bookingId },
+        data: { bookingStatus: "DISPUTED", status: "disputed" },
+      });
+      await this.recordTimelineEvent(
+        bookingId, "DAMAGE_CLAIMED", business.id, "OWNER",
+        "Owner Filed a Claim",
+        `Owner claimed ${rupees(input.claimedAmountPaise)} (${input.claimType}): "${input.description}". The renter has until ${responseDeadline.toISOString()} to accept or dispute; the deposit stays in escrow.`,
+        null, tx
+      );
+      return b;
+    });
+    return forViewer(updated, business.id);
+  }
+
+  /** Renter accepts (settled from the deposit) or disputes (escalated to admin) an owner's claim. */
+  static async renterRespondClaim(bookingId: string, userId: string, input: RenterClaimResponseInput) {
+    const business = await requireBusiness(userId);
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.seekerId !== business.id) throw forbidden("Only the renter can respond to a claim");
+      assertStatus(booking, "DISPUTED", "There is no claim awaiting your response");
+      const dispute = await this.latestDispute(tx, bookingId);
+      if (dispute?.kind !== "RETURN_CLAIM" || dispute.status !== "OPEN") {
+        throw conflict("There is no owner claim awaiting your response");
+      }
+
+      if (input.action === "ACCEPT") {
+        return this.settleReturnClaim(
+          tx, booking, dispute, dispute.damageClaim?.claimedAmountPaise ?? booking.securityDepositPaise,
+          "PAY_OWNER", "Renter accepted the claim.", business.id, "RENTER"
+        );
+      }
+
+      await tx.dispute.update({
+        where: { id: dispute.id },
         data: {
-          bookingStatus:       "DISPUTED",   // FIX #9: route through DISPUTED for admin resolution
-          nonReturnReportedAt: now,
-          status:              "disputed",   // FIX #20
+          status: "ESCALATED",
+          escalatedAt: new Date(),
+          renterResponse: input.rebuttalNotes || null,
+          renterReason: input.reason || "NOT_CAUSED_BY_RENTER",
         },
       });
+      for (const url of input.rebuttalEvidenceUrls) {
+        await tx.evidence.create({
+          data: { bookingId, uploadedById: business.id, stage: "RENTER_REBUTTAL", fileUrl: url, notes: input.rebuttalNotes },
+        });
+      }
+      await this.recordTimelineEvent(
+        bookingId, "CLAIM_DISPUTED", business.id, "RENTER",
+        "Renter Disputed the Claim",
+        `Renter contested the claim (${input.reason || "NOT_CAUSED_BY_RENTER"}): "${input.rebuttalNotes || "Condition disputed"}". Sent to HostNexus admin for a decision.`,
+        null, tx
+      );
+      return tx.bookingRequest.findUniqueOrThrow({ where: { id: bookingId } });
     });
+    return forViewer(updated, business.id);
+  }
 
+  /** Close a return claim by splitting the deposit and completing the booking. */
+  private static async settleReturnClaim(
+    tx: Tx,
+    booking: BookingRequest,
+    dispute: { id: string; damageClaimId: string | null },
+    ownerShareRequested: number,
+    decision: string,
+    notes: string,
+    actorId: string | null,
+    actorRole: ActorRole
+  ) {
+    const now = new Date();
+    const { ownerShare, renterShare, financialStatus } = await this.settleDeposit(tx, booking, ownerShareRequested);
+
+    await tx.dispute.update({
+      where: { id: dispute.id },
+      data: {
+        status: "RESOLVED",
+        adminDecision: decision,
+        resolutionAmountPaise: ownerShare,
+        resolutionNotes: notes,
+        resolvedById: actorId,
+        resolvedAt: now,
+      },
+    });
+    if (dispute.damageClaimId) {
+      await tx.damageClaim.update({
+        where: { id: dispute.damageClaimId },
+        data: { status: decision === "REJECT_CLAIM" || ownerShare === 0 ? "REJECTED" : "RESOLVED", resolvedAt: now },
+      });
+    }
+    const updated = await tx.bookingRequest.update({
+      where: { id: booking.id },
+      data: { bookingStatus: "COMPLETED", financialStatus, completedAt: now, status: "completed" },
+    });
     await this.recordTimelineEvent(
-      bookingId, "NON_RETURN_REPORTED", business.id, "OWNER",
-      "Resource Non-Return Reported",
-      "Owner reported that the resource was not returned after the agreed rental period. Dispute opened; deposit held; sent to Customer Care."
+      booking.id, "DISPUTE_RESOLVED", actorId, actorRole,
+      `Claim Settled (${decision})`,
+      `${notes} ${rupees(ownerShare)} of the deposit goes to the owner and ${rupees(renterShare)} is refunded to the renter.`,
+      null, tx
     );
+    return updated;
+  }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // ADMIN — resolve any dispute (called from /api/admin/disputes)
+  // ─────────────────────────────────────────────────────────────────────
+
+  static async adminResolveDispute(bookingId: string, adminId: string, input: AdminResolveDisputeInput) {
+    const admin = await prisma.admin.findUnique({ where: { id: adminId } });
+    if (!admin) throw forbidden("Admin access required to resolve disputes");
+
+    return this.inBookingTx(bookingId, async (tx, booking) => {
+      assertStatus(booking, "DISPUTED", "Only disputed bookings can be resolved");
+      const dispute = await this.latestDispute(tx, bookingId);
+      if (!dispute || dispute.status === "RESOLVED") throw conflict("This booking has no unresolved dispute");
+
+      const notes = `Admin (${admin.name}): ${input.resolutionNotes}`;
+
+      if (dispute.kind === "HANDOVER_ISSUE") {
+        if (!["FULL_REFUND", "REJECT_ISSUE", "PARTIAL_REFUND"].includes(input.decision)) {
+          throw badRequest("A handover issue can be resolved with FULL_REFUND, REJECT_ISSUE or PARTIAL_REFUND");
+        }
+        const maxRefund = booking.rentAmountPaise + booking.transportFeePaise;
+        const amount = input.resolutionAmountPaise ?? 0;
+        if (input.decision === "PARTIAL_REFUND" && (amount <= 0 || amount >= maxRefund)) {
+          throw badRequest(`A partial refund must be between ₹0.01 and ${rupees(maxRefund - 1)} (rent + transport)`);
+        }
+        return this.resolveHandoverIssue(
+          tx, booking, dispute.id, input.decision as "FULL_REFUND" | "REJECT_ISSUE" | "PARTIAL_REFUND",
+          amount, notes, adminId, "ADMIN"
+        );
+      }
+
+      if (!["REFUND_RENTER", "REJECT_CLAIM", "PAY_OWNER", "PARTIAL_SETTLEMENT"].includes(input.decision)) {
+        throw badRequest("A return claim can be resolved with REFUND_RENTER, REJECT_CLAIM, PAY_OWNER or PARTIAL_SETTLEMENT");
+      }
+      let ownerShare = 0;
+      if (input.decision === "PAY_OWNER") {
+        ownerShare = dispute.damageClaim?.claimedAmountPaise ?? booking.securityDepositPaise;
+      } else if (input.decision === "PARTIAL_SETTLEMENT") {
+        const amount = input.resolutionAmountPaise;
+        if (amount === undefined || amount < 0 || amount > booking.securityDepositPaise) {
+          throw badRequest(`Owner's share must be between ₹0 and the deposit (${rupees(booking.securityDepositPaise)})`);
+        }
+        ownerShare = amount;
+      }
+      return this.settleReturnClaim(tx, booking, dispute, ownerShare, input.decision, notes, adminId, "ADMIN");
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // NON-RETURN
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Owner reports that nothing came back after the last rental day. */
+  static async reportNonReturn(bookingId: string, userId: string) {
+    const business = await requireBusiness(userId);
+
+    const updated = await this.inBookingTx(bookingId, async (tx, booking) => {
+      if (booking.providerId !== business.id) throw forbidden("Only the owner can report a non-return");
+      assertStatus(booking, "ACTIVE", "Non-return can only be reported while the booking is active");
+      if (new Date() < istDayEnd(booking.endDate)) {
+        throw conflict("You can report a non-return once the last rental day has ended");
+      }
+      return this.openNonReturnDispute(tx, booking, business.id, "OWNER");
+    });
+    return forViewer(updated, business.id);
+  }
+
+  /**
+   * Open a non-return claim on the deposit. Filed by the owner, the renter gets
+   * 48h to respond; raised by the system (no return, no report), it goes
+   * straight to admin.
+   */
+  private static async openNonReturnDispute(tx: Tx, booking: BookingRequest, ownerBusinessId: string | null, role: "OWNER" | "SYSTEM") {
+    const now = new Date();
+    const bySystem = role === "SYSTEM";
+    const responseDeadline = bySystem ? null : addMs(now, RETURN_CLAIM_RESPONSE_MS);
+
+    const claim = await tx.damageClaim.create({
+      data: {
+        bookingId: booking.id,
+        claimantId: ownerBusinessId ?? booking.providerId,
+        claimType: "MISSING_ITEM",
+        description: bySystem
+          ? "No return was started within 24 hours after the last rental day."
+          : "Owner reported the resource was not returned after the rental period.",
+        claimedAmountPaise: booking.securityDepositPaise,
+        status: "DISPUTED",
+      },
+    });
+    await tx.dispute.create({
+      data: {
+        bookingId: booking.id,
+        damageClaimId: claim.id,
+        kind: "RETURN_CLAIM",
+        raisedByRole: role,
+        status: bySystem ? "ESCALATED" : "OPEN",
+        escalatedAt: bySystem ? now : null,
+        responseDeadline,
+      },
+    });
+    const updated = await tx.bookingRequest.update({
+      where: { id: booking.id },
+      data: { bookingStatus: "DISPUTED", nonReturnReportedAt: now, status: "disputed" },
+    });
+    await this.recordTimelineEvent(
+      booking.id, "NON_RETURN_REPORTED", ownerBusinessId, role,
+      bySystem ? "Non-Return Escalated Automatically" : "Resource Non-Return Reported",
+      bySystem
+        ? "No return was started within 24 hours after the last rental day. A non-return claim on the deposit was opened and sent to HostNexus admin."
+        : `Owner reported the resource was not returned. The renter has until ${responseDeadline!.toISOString()} to respond; the deposit stays in escrow.`,
+      null, tx
+    );
     return updated;
   }
 }

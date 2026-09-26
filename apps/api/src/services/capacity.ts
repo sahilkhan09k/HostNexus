@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../config/database.js";
+import { conflict } from "../utils/http-error.js";
 
 /**
  * Single source of truth for "is there enough of this resource left for these dates?"
@@ -13,28 +14,26 @@ export const CAPACITY_HOLDING_STATUSES = [
   "HANDOVER_INSPECTION",
   "ACTIVE",
   "RETURN_INITIATED",
-  "RETURN_NOT_RECEIVED",
   "OWNER_INSPECTION",
   "DISPUTED",
-  "NON_RETURNED",
 ];
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
 /**
- * Overlap is half-open: [startDate, endDate). A booking ending on the 12th does not
- * conflict with one starting on the 12th (totalDays is computed the same way).
+ * Booking dates are inclusive calendar days: a booking for the 10th–12th uses
+ * the unit on the 10th, 11th and 12th, so it conflicts with one starting on the 12th.
  */
 function overlapWhere(start: Date, end: Date) {
   return {
     bookingStatus: { in: CAPACITY_HOLDING_STATUSES },
-    startDate: { lt: end },
-    endDate:   { gt: start },
+    startDate: { lte: end },
+    endDate:   { gte: start },
   };
 }
 
 /**
- * Units already committed for [start, end). Sums every overlapping holding booking,
+ * Units already committed for the inclusive range [start, end]. Sums every overlapping holding booking,
  * which is conservative (two bookings on disjoint days inside the range both count).
  */
 export async function getCommittedQuantity(
@@ -55,7 +54,7 @@ export async function getCommittedQuantity(
   return agg._sum.quantity ?? 0;
 }
 
-/** Committed units per resource for [start, end), for filtering many listings at once. */
+/** Committed units per resource for [start, end], for filtering many listings at once. */
 export async function getCommittedQuantities(
   resourceIds: string[],
   start: Date,
@@ -78,7 +77,33 @@ export async function lockResource(tx: Prisma.TransactionClient, resourceId: str
   await tx.$queryRaw`SELECT id FROM "resources" WHERE id = ${resourceId} FOR UPDATE`;
 }
 
-/** Throws if fewer than `quantity` units are free for [start, end). */
+/**
+ * The most units booked on any single day from `fromDay` onwards. A listing's
+ * quantity can't be lowered below this without breaking accepted bookings.
+ */
+export async function getPeakCommittedQuantity(db: Db, resourceId: string, fromDay: Date): Promise<number> {
+  const bookings = await db.bookingRequest.findMany({
+    where: { resourceId, bookingStatus: { in: CAPACITY_HOLDING_STATUSES }, endDate: { gte: fromDay } },
+    select: { startDate: true, endDate: true, quantity: true },
+  });
+  // Sweep line over day boundaries: +q on the first day, -q the day after the last.
+  const DAY = 24 * 60 * 60 * 1000;
+  const deltas = new Map<number, number>();
+  for (const b of bookings) {
+    const from = Math.max(b.startDate.getTime(), fromDay.getTime());
+    const after = b.endDate.getTime() + DAY;
+    deltas.set(from, (deltas.get(from) ?? 0) + b.quantity);
+    deltas.set(after, (deltas.get(after) ?? 0) - b.quantity);
+  }
+  let running = 0, peak = 0;
+  for (const t of [...deltas.keys()].sort((a, b) => a - b)) {
+    running += deltas.get(t)!;
+    peak = Math.max(peak, running);
+  }
+  return peak;
+}
+
+/** Throws (409) if fewer than `quantity` units are free for [start, end]. */
 export async function assertCapacity(
   db: Db,
   resource: { id: string; quantity: number },
@@ -90,7 +115,7 @@ export async function assertCapacity(
   const committed = await getCommittedQuantity(db, resource.id, start, end, excludeBookingId);
   const free = resource.quantity - committed;
   if (quantity > free) {
-    throw new Error(
+    throw conflict(
       free <= 0
         ? "This resource is fully booked for the requested dates."
         : `Only ${free} of ${resource.quantity} unit(s) are free for the requested dates (requested ${quantity}).`

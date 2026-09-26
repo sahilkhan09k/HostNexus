@@ -5,11 +5,12 @@ import {
   updateBookingStatusSchema,
   bookingQuerySchema,
   renterReceivingInspectionSchema,
+  handoverSchema,
+  ownerHandoverResponseSchema,
   returnInitiationSchema,
   ownerReceiptSchema,
   ownerDamageClaimSchema,
   renterClaimResponseSchema,
-  adminResolveDisputeSchema,
   razorpayVerifySchema,
 } from "../schemas/booking.schema.js";
 
@@ -65,7 +66,8 @@ export class BookingController {
         return;
       }
 
-      const bookingRequest = await BookingService.getBookingRequestById(id);
+      // Only the renter and the owner can see a booking; everyone else gets 404.
+      const bookingRequest = await BookingService.getBookingRequestById(id, userId);
       if (!bookingRequest) {
         res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Booking request not found" } });
         return;
@@ -179,11 +181,12 @@ export class BookingController {
         return;
       }
 
-      const booking = await BookingService.markHandover(id, userId);
+      const input   = handoverSchema.parse(req.body);
+      const booking = await BookingService.markHandover(id, userId, input);
       res.status(200).json({
         success: true,
         data: { booking },
-        message: "Resource handover initiated. 1-hour inspection window active.",
+        message: "Handover verified. The renter's 1-hour inspection window has started.",
       });
     } catch (error) {
       next(error);
@@ -208,7 +211,32 @@ export class BookingController {
         data: { booking },
         message: input.status === "ACCEPTED"
           ? "Resource accepted. Rent released to owner."
-          : "Handover issue reported. Dispute opened.",
+          : "Handover issue reported. The owner has 24 hours to respond.",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** POST /api/bookings/:id/handover-response — owner accepts or contests a renter's handover issue */
+  static async ownerHandoverResponse(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.userId;
+      const id     = req.params.id as string;
+      if (!userId) {
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
+        return;
+      }
+
+      const input   = ownerHandoverResponseSchema.parse(req.body);
+      const booking = await BookingService.ownerRespondHandoverIssue(id, userId, input);
+
+      res.status(200).json({
+        success: true,
+        data: { booking },
+        message: input.action === "ACCEPT"
+          ? "Issue accepted. The renter is being refunded in full."
+          : "Issue contested. Sent to HostNexus admin for a decision.",
       });
     } catch (error) {
       next(error);
@@ -332,31 +360,8 @@ export class BookingController {
         success: true,
         data: { booking },
         message: input.action === "ACCEPT"
-          ? "Claim accepted and settled."
-          : "Claim disputed. Sent to Customer Care.",
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /** POST /api/bookings/:id/resolve-dispute */
-  static async adminResolveDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const userId = req.userId;
-      const id     = req.params.id as string;
-      if (!userId) {
-        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
-        return;
-      }
-
-      const input   = adminResolveDisputeSchema.parse(req.body);
-      const booking = await BookingService.adminResolveDispute(id, userId, input);
-
-      res.status(200).json({
-        success: true,
-        data: { booking },
-        message: `Dispute successfully resolved with decision: ${input.decision}.`,
+          ? "Claim accepted and settled from the deposit."
+          : "Claim disputed. Sent to HostNexus admin for a decision.",
       });
     } catch (error) {
       next(error);
