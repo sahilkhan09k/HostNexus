@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, TrendingDown } from "lucide-react";
 import { Button, Eyebrow, NavBar, SearchBar } from "@/components/ds";
@@ -7,11 +8,13 @@ import { useAuth } from "@/contexts/auth-context";
 import { Container, useScrollY } from "@/components/landing/motion";
 import { HERO_AVATARS, HERO_IMAGE, NAV_LINKS } from "@/components/landing/content";
 import { HeroPreviewCards } from "@/components/sections/hero-preview-cards";
+import { cn } from "@/lib/utils";
 
 export function HeroSection() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
   const y = useScrollY();
+  const scrolled = useScrolledPast(24);
 
   const search = (value: string) => {
     const q = value.trim();
@@ -20,6 +23,27 @@ export function HeroSection() {
 
   return (
     <section className="hn-hero">
+      {/* Fixed so the nav stays reachable anywhere on the page; turns solid once the page scrolls. */}
+      <header className={cn("hn-topbar", scrolled && "is-scrolled")}>
+        <Container reveal={false}>
+          <NavBar
+            links={NAV_LINKS}
+            brand="HostNexus"
+            tone={scrolled ? "dark" : "light"}
+            actions={
+              isAuthenticated ? (
+                <Button size="sm" href="/dashboard">Dashboard</Button>
+              ) : (
+                <div className="hn-hero__nav-actions">
+                  <Button size="sm" variant="ghost" href="/login" className="hn-hero__signin">Sign In</Button>
+                  <Button size="sm" href="/register">Get Started</Button>
+                </div>
+              )
+            }
+          />
+        </Container>
+      </header>
+
       <div className="hn-hero__photo" style={{ transform: `translateY(${y * 0.25}px)` }}>
         {/* eslint-disable-next-line @next/next/no-img-element -- remote Unsplash photo, as before */}
         <img className="hn-hero__img" src={HERO_IMAGE} alt="" fetchPriority="high" />
@@ -34,21 +58,6 @@ export function HeroSection() {
       </div>
 
       <Container reveal={false} className="hn-hero__inner">
-        <NavBar
-          links={NAV_LINKS}
-          brand="HostNexus"
-          actions={
-            isAuthenticated ? (
-              <Button size="sm" href="/dashboard">Dashboard</Button>
-            ) : (
-              <div className="hn-hero__nav-actions">
-                <Button size="sm" variant="ghost" href="/login" className="hn-hero__signin">Sign In</Button>
-                <Button size="sm" href="/register">Get Started</Button>
-              </div>
-            )
-          }
-        />
-
         <div className="hn-hero__grid">
           <div className="hn-hero__copy">
             <span className="hn-hero__badge">
@@ -97,4 +106,16 @@ export function HeroSection() {
       </Container>
     </section>
   );
+}
+
+/** True once the page has scrolled more than `offset` px. Unlike useScrollY, not disabled by reduced motion. */
+function useScrolledPast(offset: number) {
+  const [past, setPast] = useState(false);
+  useEffect(() => {
+    const update = () => setPast(window.scrollY > offset);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
+  }, [offset]);
+  return past;
 }
