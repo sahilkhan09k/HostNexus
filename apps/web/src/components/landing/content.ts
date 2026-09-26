@@ -148,35 +148,12 @@ export const TESTIMONIALS = [
 export const FOOTER_LINKS: Record<string, { label: string; href: string }[]> = {
   Platform: [
     { label: "Marketplace", href: "#marketplace" },
-    { label: "AI Concierge", href: "#ai-concierge" },
-    { label: "Business Dashboard", href: "/dashboard" },
     { label: "How It Works", href: "#how-it-works" },
+    { label: "AI Concierge", href: "#ai-concierge" },
+  ],
+  Account: [
+    { label: "Sign In", href: "/login" },
     { label: "List a Resource", href: "/register" },
-    { label: "Pricing", href: "#" },
-  ],
-  Company: [
-    { label: "About Us", href: "#" },
-    { label: "Blog", href: "#" },
-    { label: "Careers", href: "#" },
-    { label: "Press Kit", href: "#" },
-    { label: "Contact Us", href: "#" },
-    { label: "Partnerships", href: "#" },
-  ],
-  Support: [
-    { label: "Help Centre", href: "#" },
-    { label: "API Documentation", href: "#" },
-    { label: "System Status", href: "#" },
-    { label: "Community Forum", href: "#" },
-    { label: "Report an Issue", href: "#" },
-  ],
-  Legal: [
-    { label: "Privacy Policy", href: "#" },
-    { label: "Terms of Service", href: "#" },
-    { label: "Cookie Policy", href: "#" },
-    { label: "Refund Policy", href: "#" },
-    { label: "GST Information", href: "#" },
+    { label: "Business Dashboard", href: "/dashboard" },
   ],
 };
-
-export const SOCIAL = ["Website", "LinkedIn", "Instagram", "YouTube"];
-export const TRUST_BADGES = ["ISO 27001 Compliant", "SSL Secured", "GST Registered"];
