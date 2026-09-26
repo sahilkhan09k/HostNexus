@@ -4,15 +4,89 @@
   max-width: var(--hn-container-max); margin: 0 auto; padding: 0 var(--hn-gutter); box-sizing: border-box;
 }
 
-/* Section reveal: blur 12px → 0, fade, translateY 24px → 0 over 900ms. Plays once. */
-.hn-reveal {
-  opacity: 0; filter: blur(12px); transform: translateY(24px);
-  transition:
-    opacity var(--hn-dur-reveal) var(--hn-ease-out),
-    filter var(--hn-dur-reveal) var(--hn-ease-out),
-    transform var(--hn-dur-reveal) var(--hn-ease-out);
+/*
+ * Section entry: once a container scrolls into view, its direct children rise in
+ * one after another (blur 12px → 0, fade, translateY 32px → 0). Split layouts slide
+ * in from opposite sides. Plays once. `backwards` fill hands styling back to the
+ * element when done, so hover transforms keep working.
+ */
+.hn-reveal { --hn-reveal-delay: 200ms; }
+.hn-reveal > * { opacity: 0; }
+.hn-reveal.is-visible > * {
+  opacity: 1;
+  animation: hn-section-in var(--hn-dur-reveal) var(--hn-ease-out) backwards;
+  animation-delay: var(--hn-reveal-delay);
 }
-.hn-reveal.is-visible { opacity: 1; filter: none; transform: none; }
+.hn-reveal.is-visible > :nth-child(2) { animation-delay: calc(var(--hn-reveal-delay) + 150ms); }
+.hn-reveal.is-visible > :nth-child(3) { animation-delay: calc(var(--hn-reveal-delay) + 300ms); }
+.hn-reveal.is-visible > :nth-child(4) { animation-delay: calc(var(--hn-reveal-delay) + 450ms); }
+.hn-reveal.is-visible > :nth-child(n+5) { animation-delay: calc(var(--hn-reveal-delay) + 600ms); }
+.hn-reveal.is-visible:is(.hn-split, .hn-concierge) > :first-child { animation-name: hn-slide-from-left; }
+.hn-reveal.is-visible:is(.hn-split, .hn-concierge) > :last-child { animation-name: hn-slide-from-right; }
+.hn-reveal.is-visible > .hn-cta { animation-name: hn-zoom-in; }
+.hn-reveal.is-visible .hn-cta__img { animation: hn-hero-zoom 1600ms var(--hn-ease-out) var(--hn-reveal-delay) backwards; }
+
+@keyframes hn-section-in {
+  from { opacity: 0; filter: blur(12px); transform: translateY(32px); }
+  to { opacity: 1; filter: none; transform: none; }
+}
+@keyframes hn-slide-from-left {
+  from { opacity: 0; filter: blur(8px); transform: translateX(-48px); }
+  to { opacity: 1; filter: none; transform: none; }
+}
+@keyframes hn-slide-from-right {
+  from { opacity: 0; filter: blur(8px); transform: translateX(48px); }
+  to { opacity: 1; filter: none; transform: none; }
+}
+@keyframes hn-zoom-in {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+
+/*
+ * Card entry: items in card grids and lists rise and settle from 96% scale in a
+ * stagger, starting after their section has begun to appear. --i is the item's
+ * position; --hn-stagger-step sets the gap between items.
+ */
+.hn-reveal :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 0; }
+.hn-reveal.is-visible :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * {
+  opacity: 1;
+  animation: hn-card-in 800ms var(--hn-ease-out) backwards;
+  animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
+}
+:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(2) { --i: 1; }
+:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(3) { --i: 2; }
+:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(4) { --i: 3; }
+:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(5) { --i: 4; }
+:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(n+6) { --i: 5; }
+.hn-steps { --hn-stagger-step: 180ms; }
+.hn-guarantees__list { --hn-stagger-base: 700ms; --hn-stagger-step: 80ms; }
+.hn-chat__messages { --hn-stagger-base: 750ms; --hn-stagger-step: 450ms; }
+
+/* Resource cards: the photo wipes up inside its frame and settles from a slight zoom. */
+.hn-reveal.is-visible .hn-resource-grid .hn-resource-card__frame {
+  animation: hn-frame-wipe 900ms var(--hn-ease-out) backwards;
+  animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
+}
+.hn-reveal.is-visible .hn-resource-grid .hn-visual__img {
+  animation: hn-photo-settle 1200ms var(--hn-ease-out) backwards;
+  animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
+}
+/* Testimonials swap with a short rise. */
+.hn-reveal.is-visible .hn-testimonial { animation: hn-card-in 600ms var(--hn-ease-out) backwards; }
+
+@keyframes hn-card-in {
+  from { opacity: 0; transform: translateY(40px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes hn-frame-wipe {
+  from { clip-path: inset(100% 0 0 0 round var(--hn-radius-lg)); }
+  to { clip-path: inset(0 0 0 0 round var(--hn-radius-lg)); }
+}
+@keyframes hn-photo-settle {
+  from { transform: scale(1.15); }
+  to { transform: none; }
+}
 
 .hn-section { padding: var(--hn-section-y) 0; }
 .hn-section--page { background: var(--hn-surface-page); }
@@ -385,7 +459,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hn-reveal { opacity: 1; filter: none; transform: none; transition: none; }
+  .hn-reveal > *,
+  .hn-reveal :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 1 !important; animation: none !important; }
+  .hn-reveal.is-visible :is(.hn-cta__img, .hn-resource-card__frame, .hn-visual__img, .hn-testimonial) { animation: none !important; }
   .hn-hero__img, .hn-hero__copy > *, .hn-hero__preview { animation: none; }
   .hn-resource-card:hover .hn-resource-card__zoom { transform: none; }
 }

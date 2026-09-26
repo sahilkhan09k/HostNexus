@@ -76,7 +76,8 @@ export function ResourceCategories() {
           })}
         </div>
 
-        <div className="hn-resource-grid">
+        {/* Keyed by filter so the cards replay their entry animation on each switch. */}
+        <div key={active} className="hn-resource-grid">
           {cards.map((card) => <ResourceCard key={card.id} card={card} />)}
         </div>
       </Container>
