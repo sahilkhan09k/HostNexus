@@ -27,7 +27,7 @@ export function HeroPreviewCards() {
     <div className="hn-preview" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       <Link key={card.id} href="/marketplace" className="hn-preview__card">
         <div className="hn-preview__media">
-          <ResourceVisual category={card.category} iconSize={64} />
+          <ResourceVisual category={card.category} image={card.image} alt={card.title} iconSize={64} sizes="420px" />
           <span className="hn-chip hn-chip--glass hn-preview__tag">{card.tag}</span>
           <span className={cn("hn-chip hn-preview__status", card.available ? "hn-chip--available" : "hn-chip--glass")}>
             {card.available && <i />}

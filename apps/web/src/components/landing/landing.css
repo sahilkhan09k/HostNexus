@@ -64,6 +64,12 @@
     linear-gradient(160deg, var(--hn-night-500) 0%, var(--hn-night-700) 45%, var(--hn-ink-900) 100%);
 }
 .hn-visual__icon { color: rgba(255, 255, 255, .55); }
+.hn-visual__img { object-fit: cover; }
+/* Keeps the status/tag chips legible over bright photos. */
+.hn-visual--photo::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(11, 13, 17, .35) 0%, transparent 35%);
+}
 
 /* ── Hero ─────────────────────────────────── */
 .hn-hero { position: relative; min-height: max(820px, 100vh); background: var(--hn-night-900); overflow: hidden; color: var(--hn-white); }

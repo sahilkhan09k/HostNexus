@@ -14,7 +14,7 @@ export function CtaSection() {
           <div className="hn-cta__content">
             <span className="hn-hero__badge">
               <span className="hn-hero__badge-dot" />
-              <Eyebrow tone="light" style={{ color: "inherit" }}>Join 200+ Businesses</Eyebrow>
+              <Eyebrow tone="light" style={{ color: "inherit" }}>Join Verified Businesses</Eyebrow>
             </span>
             <h2 className="hn-cta__title">Start Connecting Your<br />Resources Today</h2>
             <p className="hn-cta__lead">

@@ -14,7 +14,7 @@ function ResourceCard({ card }: { card: Listing }) {
     <Link href="/marketplace" className="hn-resource-card">
       <div className="hn-resource-card__frame">
         <div className="hn-resource-card__zoom">
-          <ResourceVisual category={card.category} />
+          <ResourceVisual category={card.category} image={card.image} alt={card.title} />
         </div>
         <span className="hn-chip hn-chip--glass hn-resource-card__tag">{card.tag}</span>
         <span className={cn("hn-chip hn-resource-card__status", card.available ? "hn-chip--available" : "hn-chip--glass")}>
@@ -51,7 +51,7 @@ export function ResourceCategories() {
           eyebrow="Marketplace"
           title={<>Discover Available<br />Resources</>}
           description="Browse live inventory shared by hotels, caterers, and event venues across Pune and Mumbai."
-          action={<Button variant="outline" arrow size="sm" href="/marketplace">View All 35+ Resources</Button>}
+          action={<Button variant="outline" arrow size="sm" href="/marketplace">View All Resources</Button>}
         />
 
         <div className="hn-pills" role="toolbar" aria-label="Filter by category">

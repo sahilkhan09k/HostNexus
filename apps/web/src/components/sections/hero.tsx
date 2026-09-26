@@ -72,7 +72,7 @@ export function HeroSection() {
               <div className="hn-hero__avatars" aria-hidden="true">
                 {HERO_AVATARS.map((initials) => <span key={initials}>{initials}</span>)}
               </div>
-              <p>Trusted by <b>200+ businesses</b> · Pune &amp; Mumbai</p>
+              <p><b>KYC-verified businesses</b> · Pune &amp; Mumbai</p>
             </div>
             <div className="hn-hero__chips">
               <div className="hn-glass-chip">

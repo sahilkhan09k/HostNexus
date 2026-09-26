@@ -15,9 +15,9 @@ export const NAV_LINKS = [
 export const HERO_AVATARS = ["JM", "RB", "IH", "FH"];
 
 export const STATS = [
-  { value: 35, prefix: "", suffix: "+", label: "Resources listed" },
-  { value: 200, prefix: "", suffix: "+", label: "Businesses onboard" },
-  { value: 48, prefix: "₹", suffix: "L+", label: "Saved monthly" },
+  { value: 6, prefix: "", suffix: "", label: "Resource categories" },
+  { value: 100, prefix: "", suffix: "%", label: "KYC-verified businesses" },
+  { value: 100, prefix: "", suffix: "%", label: "Payments held in escrow" },
   { value: 0, prefix: "", suffix: "", label: "Double bookings" },
 ];
 
@@ -40,6 +40,8 @@ export interface Listing {
   business: string;
   location: string;
   description?: string;
+  /** Photo served from /public/listings. */
+  image: string;
   price: string;
   unit: string;
   capacity: string;
@@ -54,6 +56,7 @@ export const LISTINGS: Listing[] = [
     id: 1, category: "banquet", tag: "Banquet Hall", title: "Grand Ballroom", business: "JW Marriott Pune",
     location: "Koregaon Park, Pune",
     description: "Opulent 10,000 sq.ft space with crystal chandeliers and AV setup included.",
+    image: "/listings/grand-ballroom.jpg",
     price: "₹45,000", unit: "/day", capacity: "500 pax", rating: 4.9, reviews: 38,
     available: true, availableLabel: "Available Sat–Sun",
   },
@@ -61,6 +64,7 @@ export const LISTINGS: Listing[] = [
     id: 2, category: "kitchen", tag: "Commercial Kitchen", title: "Industrial Production Kitchen", business: "Radisson Blu Pune",
     location: "Bund Garden Road, Pune",
     description: "Rational iCombi Pro 20-Grid Oven, prep stations, walk-in cold storage.",
+    image: "/listings/production-kitchen.jpg",
     price: "₹8,500", unit: "/half-day", capacity: "12 staff", rating: 4.7, reviews: 24,
     available: true, availableLabel: "Available weekdays",
   },
@@ -68,24 +72,28 @@ export const LISTINGS: Listing[] = [
     id: 3, category: "av", tag: "AV Equipment", title: "Full AV Conference Bundle", business: "Fortune Hotels India",
     location: "Viman Nagar, Pune",
     description: "4K projector, 75\" smart displays ×4, wireless mics, Dolby sound system.",
+    image: "/listings/av-conference-bundle.jpg",
     price: "₹12,000", unit: "/day", capacity: "200 pax", rating: 4.8, reviews: 17,
     available: false, availableLabel: "Next available Mon",
   },
   {
     id: 4, category: "event", tag: "Event Space", title: "Rooftop Terrace — 5,000 sq.ft", business: "Hyatt Regency Pune",
     location: "Nagar Road, Pune",
+    image: "/listings/rooftop-terrace.jpg",
     price: "₹28,000", unit: "/day", capacity: "350 pax", rating: 4.9, reviews: 29,
     available: true, availableLabel: "Available",
   },
   {
     id: 5, category: "furniture", tag: "Furniture & Fixtures", title: "Premium Chair & Table Set ×200", business: "ITC Maratha Mumbai",
     location: "Andheri East, Mumbai",
+    image: "/listings/chair-table-set.jpg",
     price: "₹6,000", unit: "/day", capacity: "200 pax", rating: 4.6, reviews: 41,
     available: true, availableLabel: "Available",
   },
   {
     id: 6, category: "vehicles", tag: "Vehicle Fleet", title: "Luxury Coach Fleet ×4 Buses", business: "Sahara Star Mumbai",
     location: "Santacruz, Mumbai",
+    image: "/listings/luxury-coach-fleet.jpg",
     price: "₹22,000", unit: "/day", capacity: "160 seats", rating: 4.5, reviews: 12,
     available: false, availableLabel: "Fri onwards",
   },
