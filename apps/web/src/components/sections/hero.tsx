@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, TrendingDown } from "lucide-react";
 import { Button, Eyebrow, NavBar, SearchBar } from "@/components/ds";
@@ -9,6 +9,8 @@ import { Container, useScrollY } from "@/components/landing/motion";
 import { HERO_AVATARS, HERO_IMAGE, NAV_LINKS } from "@/components/landing/content";
 import { HeroPreviewCards } from "@/components/sections/hero-preview-cards";
 import { cn } from "@/lib/utils";
+
+const WORDMARK = Array.from("HostNexus");
 
 export function HeroSection() {
   const router = useRouter();
@@ -54,7 +56,12 @@ export function HeroSection() {
         aria-hidden="true"
         style={{ transform: `translateY(${y * 0.45}px)`, opacity: Math.max(0, 1 - y / 500) }}
       >
-        <span>HostNexus</span>
+        {/* Staggered reveal: each letter rises out of a blur a beat after the one before */}
+        <span className="hn-hero__wordmark-text">
+          {WORDMARK.map((ch, i) => (
+            <span key={i} className="hn-hero__wordmark-char" style={{ "--i": i } as CSSProperties}>{ch}</span>
+          ))}
+        </span>
       </div>
 
       <Container reveal={false} className="hn-hero__inner">
