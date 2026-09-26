@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -677,7 +678,7 @@ export default function DashboardResourceDetailPage() {
             <motion.div key={photoIdx} initial={{ opacity: 0.7 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
               className="relative aspect-video overflow-hidden rounded-2xl border border-stone-200 bg-stone-100 shadow-sm">
               {photo ? (
-                <img src={photo} alt={resource.name} className="h-full w-full object-cover" />
+                <img src={mediaUrl(photo)} alt={resource.name} className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center gap-2 text-stone-400">
                   <Package className="h-10 w-10" /><span className="text-sm">No photos</span>
@@ -701,7 +702,7 @@ export default function DashboardResourceDetailPage() {
                     className={cn("h-16 w-20 shrink-0 overflow-hidden rounded-xl border-2 transition-all",
                       i === photoIdx ? "border-emerald-600 ring-2 ring-emerald-500/20" : "border-stone-200 opacity-60 hover:opacity-100"
                     )}>
-                    <img src={p} alt="" className="h-full w-full object-cover" />
+                    <img src={mediaUrl(p)} alt="" className="h-full w-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -790,7 +791,7 @@ export default function DashboardResourceDetailPage() {
                   <div className="grid grid-cols-4 gap-2 pt-1">
                     {resource.damagePhotos.map((dp, i) => (
                       <div key={i} className="aspect-square overflow-hidden rounded-lg border border-amber-200">
-                        <img src={dp} alt="" className="h-full w-full object-cover" />
+                        <img src={mediaUrl(dp)} alt="" className="h-full w-full object-cover" />
                       </div>
                     ))}
                   </div>

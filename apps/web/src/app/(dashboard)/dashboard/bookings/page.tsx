@@ -46,7 +46,6 @@ import {
   submitOwnerAcceptReturn,
   submitOwnerDamageClaim,
   submitRenterClaimResponse,
-  adminResolveDispute,
   makeNegotiationOffer,
   acceptNegotiationOffer,
   rejectNegotiation,
@@ -54,6 +53,7 @@ import {
   type NegotiationOffer,
 } from "@/lib/api-client";
 import type { BookingRequestWithDetails, ClaimType, DisputeReason } from "@hostnexus/types";
+import { mediaUrl } from "@/lib/media";
 
 // Countdown timer helper hook
 function useCountdown(targetDate: string | null | undefined) {
@@ -127,10 +127,6 @@ export default function BookingsPage() {
   const [renterDisputeNotes, setRenterDisputeNotes] = useState("");
   const [renterDisputePhotos, setRenterDisputePhotos] = useState<string[]>([]);
 
-  const [adminResolutionModal, setAdminResolutionModal] = useState(false);
-  const [adminDecision, setAdminDecision] = useState<"REFUND_RENTER" | "PAY_OWNER" | "PARTIAL_SETTLEMENT">("REFUND_RENTER");
-  const [partialOwnerINR, setPartialOwnerINR] = useState<number>(0);
-  const [adminNotes, setAdminNotes] = useState("");
 
   // ── Negotiation state ─────────────────────────────────────────
   const [negotiateModal, setNegotiateModal] = useState(false);
@@ -364,26 +360,6 @@ export default function BookingsPage() {
       setRenterDisputeModal(false);
       setRenterDisputeNotes("");
       setRenterDisputePhotos([]);
-      await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleAdminResolution = async () => {
-    if (!selectedBooking) return;
-    setActionLoading("admin-resolution");
-    try {
-      await adminResolveDispute(selectedBooking.id, {
-        decision: adminDecision,
-        resolutionAmountPaise: Math.round(partialOwnerINR * 100),
-        resolutionNotes: adminNotes,
-      });
-      setAdminResolutionModal(false);
-      setAdminNotes("");
-      setPartialOwnerINR(0);
       await refreshDetail();
     } catch (err: any) {
       alert(err.message);
@@ -864,18 +840,11 @@ export default function BookingsPage() {
                       </>
                     )}
 
-                    {/* DISPUTE CUSTOMER CARE BUTTON */}
-                    {(activeTab === "disputes" || b.bookingStatus === "DISPUTED") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          openDetail(b.id);
-                          setAdminResolutionModal(true);
-                        }}
-                        className="px-4 py-1.5 rounded-lg bg-rose-600 text-xs font-bold text-white hover:bg-rose-700 shadow-xs"
-                      >
-                        Resolve Dispute (Admin)
-                      </button>
+                    {/* Disputes are decided by HostNexus Customer Care in the admin console */}
+                    {b.bookingStatus === "DISPUTED" && (
+                      <span className="px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700">
+                        Under Customer Care review
+                      </span>
                     )}
                   </div>
                 </div>
@@ -1000,7 +969,7 @@ export default function BookingsPage() {
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           {selectedBooking.listingPhotosSnapshot && selectedBooking.listingPhotosSnapshot.length > 0 ? (
                             selectedBooking.listingPhotosSnapshot.map((url, i) => (
-                              <img key={i} src={url} alt="Listing" className="w-full h-16 object-cover rounded-lg border border-stone-200" />
+                              <img key={i} src={mediaUrl(url)} alt="Listing" className="w-full h-16 object-cover rounded-lg border border-stone-200" />
                             ))
                           ) : (
                             <span className="text-[11px] text-stone-400 col-span-2 py-4 text-center">No photos</span>
@@ -1022,7 +991,7 @@ export default function BookingsPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           {selectedBooking.evidence?.filter((e) => e.stage === "RECEIVING").map((e, i) => (
-                            <img key={i} src={e.fileUrl} alt="Receiving" className="w-full h-16 object-cover rounded-lg border border-purple-300" />
+                            <img key={i} src={mediaUrl(e.fileUrl)} alt="Receiving" className="w-full h-16 object-cover rounded-lg border border-purple-300" />
                           ))}
                         </div>
                       </div>
@@ -1041,7 +1010,7 @@ export default function BookingsPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           {selectedBooking.evidence?.filter((e) => e.stage === "RETURN").map((e, i) => (
-                            <img key={i} src={e.fileUrl} alt="Return" className="w-full h-16 object-cover rounded-lg border border-sky-300" />
+                            <img key={i} src={mediaUrl(e.fileUrl)} alt="Return" className="w-full h-16 object-cover rounded-lg border border-sky-300" />
                           ))}
                         </div>
                       </div>
@@ -1062,7 +1031,7 @@ export default function BookingsPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           {selectedBooking.evidence?.filter((e) => e.stage === "DAMAGE_CLAIM").map((e, i) => (
-                            <img key={i} src={e.fileUrl} alt="Damage" className="w-full h-16 object-cover rounded-lg border border-rose-300" />
+                            <img key={i} src={mediaUrl(e.fileUrl)} alt="Damage" className="w-full h-16 object-cover rounded-lg border border-rose-300" />
                           ))}
                         </div>
                       </div>
@@ -1516,113 +1485,6 @@ export default function BookingsPage() {
         </div>
       )}
 
-      {/* ── Admin Dispute Resolution Modal ─────────────────────────── */}
-      {adminResolutionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 space-y-4 shadow-xl">
-            <div className="flex items-center gap-2 text-rose-700">
-              <Scale className="w-6 h-6" />
-              <h3 className="text-base font-bold text-stone-900">Customer Care Dispute Resolution Panel</h3>
-            </div>
-            <p className="text-xs text-stone-500">
-              Compare the pre-rental listing, receiving, return, and claim evidence to make an authoritative financial settlement.
-            </p>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-stone-700">Settlement Decision *</label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAdminDecision("REFUND_RENTER")}
-                  className={cn(
-                    "p-2.5 rounded-xl border text-xs font-bold text-center transition-all",
-                    adminDecision === "REFUND_RENTER"
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-500/20"
-                      : "border-stone-200 text-stone-600 hover:bg-stone-50"
-                  )}
-                >
-                  Full Refund to Renter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdminDecision("PAY_OWNER")}
-                  className={cn(
-                    "p-2.5 rounded-xl border text-xs font-bold text-center transition-all",
-                    adminDecision === "PAY_OWNER"
-                      ? "border-rose-500 bg-rose-50 text-rose-800 ring-2 ring-rose-500/20"
-                      : "border-stone-200 text-stone-600 hover:bg-stone-50"
-                  )}
-                >
-                  Pay Full Deposit to Owner
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdminDecision("PARTIAL_SETTLEMENT")}
-                  className={cn(
-                    "p-2.5 rounded-xl border text-xs font-bold text-center transition-all",
-                    adminDecision === "PARTIAL_SETTLEMENT"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-800 ring-2 ring-indigo-500/20"
-                      : "border-stone-200 text-stone-600 hover:bg-stone-50"
-                  )}
-                >
-                  Partial Settlement
-                </button>
-              </div>
-            </div>
-
-            {adminDecision === "PARTIAL_SETTLEMENT" && (
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Amount Awarded to Owner (₹ INR) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max={(selectedBooking?.securityDepositPaise || 0) / 100}
-                  value={partialOwnerINR || ""}
-                  onChange={(e) => setPartialOwnerINR(parseFloat(e.target.value) || 0)}
-                  placeholder="e.g. 1500"
-                  className="w-full rounded-xl border border-stone-200 p-2.5 text-xs"
-                />
-                <p className="text-[11px] text-stone-500 mt-1">
-                  Remainder (₹{(((selectedBooking?.securityDepositPaise || 0) / 100) - partialOwnerINR).toLocaleString()}) will be refunded to the renter.
-                </p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Resolution Rationale &amp; Notes *
-              </label>
-              <textarea
-                rows={3}
-                value={adminNotes}
-                onChange={(e) => setAdminNotes(e.target.value)}
-                placeholder="Explain the evidence review findings and justification..."
-                className="w-full rounded-xl border border-stone-200 p-3 text-xs"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t">
-              <button
-                type="button"
-                onClick={() => setAdminResolutionModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleAdminResolution}
-                disabled={actionLoading === "admin-resolution" || !adminNotes.trim()}
-                className="px-5 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs"
-              >
-                {actionLoading === "admin-resolution" ? "Executing..." : "Execute Settlement"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Reject Modal (Owner) ──────────────────────────────────── */}
       {rejectModal && (

@@ -94,6 +94,11 @@ function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
 
+// Refresh tokens are single-use (rotated on every refresh). Concurrent requests
+// must share one refresh call, otherwise the second one presents an already-used
+// token and the API revokes the whole session as a suspected replay.
+let refreshInFlight: Promise<string | null> | null = null;
+
 // ─── AuthService ──────────────────────────────────────────────
 
 export class AuthService {
@@ -152,7 +157,14 @@ export class AuthService {
 
   // ── Token refresh ─────────────────────────────────────────
 
-  static async refreshTokens(): Promise<string | null> {
+  static refreshTokens(): Promise<string | null> {
+    refreshInFlight ??= this.doRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
+  }
+
+  private static async doRefresh(): Promise<string | null> {
     const refreshToken = this.getRefreshToken();
     if (!refreshToken) return null;
     try {
@@ -161,7 +173,13 @@ export class AuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // Another tab may have rotated the token a moment ago (localStorage is shared)
+        const current = this.getRefreshToken();
+        const access = this.getAccessToken();
+        if (current && current !== refreshToken && access && !isTokenExpired(access)) return access;
+        return null;
+      }
       const data = await res.json();
       const { accessToken, refreshToken: newRefreshToken } = data.data;
       this.setTokens(accessToken, newRefreshToken);
@@ -280,12 +298,23 @@ export class AuthService {
       );
     }
 
-    // 201 — GSTIN verified, account active; no tokens issued
+    // 201 — account created; VERIFIED if the GST details matched, otherwise PENDING review
     return response.json() as Promise<RegisterResponse>;
   }
 
+  /** Revokes the session server-side, then clears local state. */
   static logout(): void {
+    const refreshToken = this.getRefreshToken();
     this.clearAuth();
+    if (refreshToken) {
+      // Best effort — local tokens are already gone either way
+      fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+        keepalive: true,
+      }).catch(() => {});
+    }
     if (isBrowser()) window.location.href = "/login";
   }
 

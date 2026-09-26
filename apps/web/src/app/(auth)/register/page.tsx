@@ -56,7 +56,7 @@ async function uploadDocToServer(file: File): Promise<string> {
     reader.onload = async (e) => {
       try {
         const base64Data = e.target?.result as string; // includes data:...;base64, prefix
-        const res = await fetch(`${API_BASE}/api/upload`, {
+        const res = await fetch(`${API_BASE}/api/upload/kyc`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -70,7 +70,7 @@ async function uploadDocToServer(file: File): Promise<string> {
           throw new Error(errBody?.error?.message ?? "Upload failed");
         }
         const data = await res.json();
-        // Single-file response returns data.data.fileUrl
+        // Private KYC reference ("/kyc/<id>.pdf") — only admins can open the document
         resolve(data.data.fileUrl as string);
       } catch (err) {
         reject(err);
@@ -258,7 +258,12 @@ export default function RegisterPage() {
         );
       }
 
-      // 201 — GSTIN verified automatically, so sign straight in
+      // 201 — if the GST registry details matched, the account is VERIFIED and we sign in;
+      // otherwise it waits for a manual review
+      if (data?.data?.user?.verificationStatus !== "VERIFIED") {
+        router.push("/pending-verification");
+        return;
+      }
       await login(form.email.trim(), form.password);
       router.push("/dashboard");
     } catch (err) {
@@ -411,8 +416,10 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type={showPassword ? "text" : "password"} required minLength={8}
-                    placeholder="Min. 8 characters" value={form.password} onChange={set("password")}
+                  <input type={showPassword ? "text" : "password"} required minLength={10} maxLength={72}
+                    pattern="(?=.*[A-Za-z])(?=.*[0-9]).{10,72}"
+                    title="10–72 characters with letters and numbers"
+                    placeholder="Min. 10 characters, letters + numbers" value={form.password} onChange={set("password")}
                     className={cn(inputCls, "pr-11")} />
                   <button type="button" onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">

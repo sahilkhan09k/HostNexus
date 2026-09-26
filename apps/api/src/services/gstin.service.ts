@@ -1,13 +1,19 @@
 import fs from "fs/promises";
 import path from "path";
 import { extractText, getDocumentProxy } from "unpdf";
+import { prisma } from "../config/database.js";
+import { KYC_DIR, MAX_KYC_BYTES } from "./upload.service.js";
 
 /**
  * Automated KYC: read the GSTIN off an uploaded GST registration certificate
  * (Groq LLM) and confirm it against the government registry via gstinapi.in.
  */
 
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+/** "/kyc/<uuid>.pdf" — the reference returned by POST /api/upload/kyc */
+const KYC_REF = /^\/kyc\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf)$/;
+const MAX_PDF_PAGES = 10;
+const PDF_PARSE_TIMEOUT_MS = 10_000;
+const LLM_TIMEOUT_MS = 20_000;
 const GSTIN_API_URL = "https://www.gstinapi.in/v1/gstin";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -36,6 +42,16 @@ function kycError(message: string, code: string, statusCode: number): Error {
   return err;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 const DOC_UNREADABLE_MESSAGE =
   "We couldn't find a GSTIN in the uploaded document. Please upload a clear copy of your GST registration certificate.";
 
@@ -57,23 +73,44 @@ export class GstinService {
     return candidates.find((c) => this.isValidGstin(c)) ?? null;
   }
 
-  /** Only files our own /api/upload wrote are readable here. */
-  private static async readUpload(fileUrl: string): Promise<Buffer> {
-    if (!fileUrl.startsWith("/uploads/")) {
-      throw kycError(DOC_UNREADABLE_MESSAGE, "GSTIN_DOCUMENT_INVALID", 422);
-    }
-    try {
-      return await fs.readFile(path.join(UPLOADS_DIR, path.basename(fileUrl)));
-    } catch {
+  /** Resolves a KYC reference to its stored filename. Only files our own /api/upload/kyc wrote are accepted. */
+  private static kycFileName(fileRef: string): string {
+    const m = KYC_REF.exec(fileRef);
+    if (!m) throw kycError(DOC_UNREADABLE_MESSAGE, "GSTIN_DOCUMENT_INVALID", 422);
+    return m[1];
+  }
+
+  /** The Upload row behind a KYC reference (throws if it was never uploaded through /api/upload/kyc). */
+  static async findKycUpload(fileRef: string) {
+    const id = this.kycFileName(fileRef);
+    const upload = await prisma.upload.findUnique({ where: { id } });
+    if (!upload || upload.purpose !== "KYC") {
       throw kycError("The uploaded GST certificate could not be found. Please upload it again.", "GSTIN_DOCUMENT_INVALID", 422);
     }
+    return upload;
+  }
+
+  /** Raw bytes of a private KYC document (used by registration and the admin viewer). */
+  static async readKycDocument(fileRef: string): Promise<Buffer> {
+    const name = this.kycFileName(fileRef);
+    try {
+      return await fs.readFile(path.join(KYC_DIR, name));
+    } catch {
+      throw kycError("The uploaded GST certificate could not be found. Please upload it again.", "GSTIN_DOCUMENT_INVALID", 404);
+    }
+  }
+
+  /** KYC uses its own key when configured so concierge traffic can't exhaust it */
+  private static groqKey(): string | undefined {
+    return process.env.GROQ_KYC_API_KEY || process.env.GROQ_API_KEY;
   }
 
   private static async askGroq(model: string, content: string): Promise<string | null> {
     const res = await fetch(GROQ_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.groqKey()}` },
       body: JSON.stringify({ model, temperature: 0, max_tokens: 1024, messages: [{ role: "user", content }] }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
     if (!res.ok) {
       console.warn(`Groq ${model} GSTIN extraction failed: ${res.status}`);
@@ -85,7 +122,7 @@ export class GstinService {
 
   /** Try each model until one returns a checksum-valid GSTIN. */
   private static async extractWithGroq(models: string[], content: string): Promise<string | null> {
-    if (!process.env.GROQ_API_KEY) return null;
+    if (!this.groqKey()) return null;
     for (const model of models) {
       try {
         const reply = await this.askGroq(model, content);
@@ -100,17 +137,29 @@ export class GstinService {
 
   /** Pull the GSTIN out of an uploaded certificate. Only text PDFs are accepted. */
   static async extractFromDocument(fileUrl: string): Promise<string> {
-    const buf = await this.readUpload(fileUrl);
+    const buf = await this.readKycDocument(fileUrl);
     if (buf.subarray(0, 4).toString() !== "%PDF") {
       throw kycError("Please upload your GST registration certificate as a PDF.", "GSTIN_DOCUMENT_INVALID", 422);
+    }
+    if (buf.length > MAX_KYC_BYTES) {
+      throw kycError("The GST certificate must be 5MB or smaller.", "GSTIN_DOCUMENT_INVALID", 413);
     }
 
     let text = "";
     try {
-      const pdf = await getDocumentProxy(new Uint8Array(buf));
-      text = (await extractText(pdf, { mergePages: true })).text;
+      text = await withTimeout(
+        (async () => {
+          const pdf = await getDocumentProxy(new Uint8Array(buf));
+          if (pdf.numPages > MAX_PDF_PAGES) {
+            throw kycError("A GST certificate is only a few pages long. Please upload the certificate PDF from the GST portal.", "GSTIN_DOCUMENT_INVALID", 422);
+          }
+          return (await extractText(pdf, { mergePages: true })).text;
+        })(),
+        PDF_PARSE_TIMEOUT_MS
+      );
     } catch (err) {
-      console.warn("GST certificate PDF text extraction failed:", err);
+      if ((err as any)?.code === "GSTIN_DOCUMENT_INVALID") throw err;
+      console.warn("GST certificate PDF text extraction failed:", (err as Error)?.message);
     }
     if (!text.trim()) {
       throw kycError(

@@ -12,6 +12,7 @@ import {
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE: Easing = [0.22, 1, 0.36, 1];
@@ -23,12 +24,10 @@ interface BusinessProfile {
     id: string;
     name: string;
     businessType: string | null;
-    addressLine: string | null;
     city: string | null;
     state: string | null;
-    pincode: string | null;
     createdAt: string;
-    owner: { id: string; ownerName: string | null; verificationStatus: string };
+    owner: { verificationStatus: string };
     resources: {
       id: string; name: string; resourceType: string;
       rentAmountPaise: number; location: string | null; photos: string[];
@@ -492,7 +491,7 @@ export default function BusinessProfilePage() {
                         {/* Thumbnail */}
                         <div className={cn("h-12 w-12 shrink-0 overflow-hidden rounded-lg", bg)}>
                           {photo ? (
-                            <img src={photo} alt={resource.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform" />
+                            <img src={mediaUrl(photo)} alt={resource.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform" />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center">
                               <Package className="h-5 w-5 text-stone-400" />

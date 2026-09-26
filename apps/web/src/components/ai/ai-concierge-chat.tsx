@@ -24,6 +24,8 @@ export interface ChatMessage {
   intent?: string;
   /** Welcome, reset and error notices are UI-only and not sent as conversation history */
   excludeFromHistory?: boolean;
+  /** Server signature of an assistant reply; unsigned assistant turns are ignored by the API */
+  signature?: string;
   timestamp: Date;
 }
 
@@ -138,6 +140,8 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
+const SAFE_INTERNAL_LINK = /^\/(marketplace|business|dashboard\/marketplace)\/[A-Za-z0-9_-]{1,64}$/;
+
 /**
  * Parses bold **text** and [link text](url) within a line
  */
@@ -158,6 +162,8 @@ function parseInlineMarkdown(text: string) {
     const linkMatch = part.match(/^\[(.*?)\]\((.*?)\)$/);
     if (linkMatch) {
       const [, label, url] = linkMatch;
+      // Model output can be steered by listing text: only render links to our own listing/business pages
+      if (!SAFE_INTERNAL_LINK.test(url)) return <span key={index}>{label}</span>;
       return (
         <Link
           key={index}
@@ -318,7 +324,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         .map((m) => ({
           role: m.role,
           content: m.content,
-          listingIds: m.results?.map((r) => r.id),
+          listingIds: m.results?.map((r) => r.id) ?? [],
+          signature: m.signature,
         }));
 
       // Call the real Express RAG backend
@@ -335,6 +342,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         sources: response.sources,
         suggestedFollowUps: response.suggestedFollowUps,
         intent: response.intent,
+        signature: response.replySignature,
         timestamp: new Date(),
       };
 

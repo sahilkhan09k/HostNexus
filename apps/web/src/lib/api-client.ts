@@ -12,7 +12,6 @@ import type {
   OwnerReceiptInput,
   OwnerDamageClaimInput,
   RenterClaimResponseInput,
-  AdminResolveDisputeInput,
 } from "@hostnexus/types";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -183,16 +182,92 @@ export async function updateBookingStatus(id: string, status: "accepted" | "reje
   return data.data.bookingRequest;
 }
 
+// ─────────────────────────────────────────
+// Razorpay Checkout
+// ─────────────────────────────────────────
+
+interface RazorpayCheckoutResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+      on: (event: string, cb: (resp: { error?: { description?: string } }) => void) => void;
+    };
+  }
+}
+
+let checkoutScript: Promise<void> | null = null;
+function loadRazorpayCheckout(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("Checkout is only available in the browser"));
+  if (window.Razorpay) return Promise.resolve();
+  checkoutScript ??= new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      checkoutScript = null;
+      reject(new Error("Could not load Razorpay checkout. Check your connection and try again."));
+    };
+    document.body.appendChild(script);
+  });
+  return checkoutScript;
+}
+
+/**
+ * Fund escrow: create (or re-use) the booking's Razorpay order, open Razorpay
+ * Checkout, then have the API verify the payment server-side. The booking is
+ * only marked funded after the API confirms the payment with Razorpay.
+ */
 export async function payEscrow(bookingId: string): Promise<BookingRequest> {
   const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/pay`, {
     method: "POST",
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to fund escrow");
+    throw new Error(err.error?.message || "Failed to start payment");
   }
-  const data = await res.json();
-  return data.data.booking;
+  const order = (await res.json()).data as { orderId: string; amount: number; currency: string; keyId: string };
+
+  await loadRazorpayCheckout();
+
+  const payment = await new Promise<RazorpayCheckoutResponse>((resolve, reject) => {
+    const checkout = new window.Razorpay!({
+      key: order.keyId,
+      order_id: order.orderId,
+      amount: order.amount,
+      currency: order.currency,
+      name: "HostNexus",
+      description: "Escrow payment",
+      handler: (resp: RazorpayCheckoutResponse) => resolve(resp),
+      modal: { ondismiss: () => reject(new Error("Payment was cancelled")) },
+    });
+    checkout.on("payment.failed", (resp) => reject(new Error(resp.error?.description || "Payment failed")));
+    checkout.open();
+  });
+
+  const verify = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/pay/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      razorpayOrderId: payment.razorpay_order_id,
+      razorpayPaymentId: payment.razorpay_payment_id,
+      razorpaySignature: payment.razorpay_signature,
+    }),
+  });
+  if (!verify.ok) {
+    const err = await verify.json().catch(() => ({}));
+    throw new Error(
+      err.error?.message ||
+        "We received your payment but couldn't confirm it yet. It will be confirmed automatically; please refresh in a minute."
+    );
+  }
+  return (await verify.json()).data.booking;
 }
 
 export async function markHandover(bookingId: string): Promise<BookingRequest> {
@@ -291,19 +366,7 @@ export async function submitRenterClaimResponse(bookingId: string, input: Renter
   return data.data.booking;
 }
 
-export async function adminResolveDispute(bookingId: string, input: AdminResolveDisputeInput): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/resolve-dispute`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to resolve dispute");
-  }
-  const data = await res.json();
-  return data.data.booking;
-}
+// Dispute resolution is admin-only: see AdminAuthService.resolveDispute (lib/admin-auth.ts)
 
 // ─────────────────────────────────────────
 // Negotiation APIs
@@ -381,7 +444,7 @@ export async function rejectNegotiation(bookingId: string, reason?: string): Pro
 
 export interface AiConciergeQueryInput {
   message: string;
-  history?: Array<{ role: "user" | "assistant" | "system"; content: string; listingIds?: string[] }>;
+  history?: Array<{ role: "user" | "assistant"; content: string; listingIds?: string[]; signature?: string }>;
   date?: string;
   location?: string;
   quantity?: number;
@@ -416,6 +479,8 @@ export interface AiListingResult {
 
 export interface AiConciergeResponse {
   reply: string;
+  /** Server signature of this reply — send it back with the turn in `history` */
+  replySignature?: string;
   results: AiListingResult[];
   intent: string;
   sources: string[];

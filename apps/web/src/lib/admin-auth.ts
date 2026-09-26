@@ -28,6 +28,9 @@ export interface PendingUser {
   gstCertificateUrl: string | null;
   aadhaarUrl: string | null;
   gstin: string | null;
+  /** Names the GST registry returned for this GSTIN — compare with the business name */
+  gstLegalName?: string | null;
+  gstTradeName?: string | null;
   createdAt: string;
   businesses: {
     id: string;
@@ -46,7 +49,25 @@ export interface AdminSummary {
   rejected: number;
   totalResources: number;
   totalBookings: number;
+  openDisputes?: number;
 }
+
+export interface DisputedBooking {
+  id: string;
+  startDate: string;
+  endDate: string;
+  securityDepositPaise: number;
+  totalAmountPaise: number;
+  financialStatus: string;
+  resource: { id: string; name: string; resourceType: string };
+  seeker: { id: string; name: string };
+  provider: { id: string; name: string };
+  damageClaims: { id: string; claimType: string; description: string; claimedAmountPaise: number; claimantId: string }[];
+  disputes: { id: string; status: string; renterReason: string | null; renterResponse: string | null }[];
+  evidence: { id: string; stage: string; fileUrl: string; notes: string | null }[];
+}
+
+export type DisputeDecision = "REFUND_RENTER" | "PAY_OWNER" | "PARTIAL_SETTLEMENT" | "REJECT_CLAIM";
 
 export class AdminAuthService {
   static getToken(): string | null {
@@ -90,8 +111,9 @@ export class AdminAuthService {
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-    const body = await res.json();
+    const body = await res.json().catch(() => ({}));
 
+    if (res.status === 401) this.clearAdmin(); // expired or revoked — force a fresh login
     if (!res.ok) {
       throw new Error(body?.error?.message ?? body?.message ?? "Request failed");
     }
@@ -129,6 +151,54 @@ export class AdminAuthService {
     await this.fetch(`/api/admin/users/${id}/reject`, {
       method: "PATCH",
       body: JSON.stringify({ notes }),
+    });
+  }
+
+  /** Ends every admin session server-side (tokens are revoked, not just forgotten). */
+  static async logout(): Promise<void> {
+    try {
+      if (this.getToken()) await this.fetch("/api/admin/logout", { method: "POST" });
+    } catch {
+      /* already invalid */
+    } finally {
+      this.clearAdmin();
+    }
+  }
+
+  /**
+   * KYC documents are private: fetch with the admin token and open the PDF from
+   * a blob URL (a plain link can't carry the Authorization header).
+   */
+  static async openKycDocument(ref: string): Promise<void> {
+    const win = window.open("", "_blank", "noopener");
+    const file = ref.replace(/^\/kyc\//, "");
+    const res = await fetch(`${API_BASE}/api/admin/kyc/${encodeURIComponent(file)}`, {
+      headers: { Authorization: `Bearer ${this.getToken() ?? ""}` },
+    });
+    if (!res.ok) {
+      win?.close();
+      if (res.status === 401) this.clearAdmin();
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? "Could not open document");
+    }
+    const url = URL.createObjectURL(await res.blob());
+    if (win) win.location.href = url;
+    else window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  static async getDisputes(): Promise<DisputedBooking[]> {
+    const body = await this.fetch<{ success: boolean; data: { bookings: DisputedBooking[] } }>("/api/admin/disputes");
+    return body.data.bookings;
+  }
+
+  static async resolveDispute(
+    bookingId: string,
+    input: { decision: DisputeDecision; resolutionAmountPaise?: number; resolutionNotes: string }
+  ): Promise<void> {
+    await this.fetch(`/api/admin/bookings/${bookingId}/resolve-dispute`, {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 }

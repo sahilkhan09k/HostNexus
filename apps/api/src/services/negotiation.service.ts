@@ -1,12 +1,14 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
-import { BookingService } from "./booking.service.js";
+import { BookingService, MAX_ORDER_PAISE, MIN_ORDER_PAISE } from "./booking.service.js";
+import { assertCapacity, lockResource } from "./capacity.js";
+import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
 
 // ─── Logic ───────────────────────────────────────────────────
 //
 // Flow:
 //   1. Renter creates booking request at listed price (status: BOOKING_REQUESTED)
-//   2. Before owner accepts, EITHER side can open a negotiation:
+//   2. Before the owner accepts, EITHER side can open a negotiation:
 //      - Renter sends initial offer (lower than listed price)
 //      - Owner counters or accepts
 //   3. Counter-offers ping-pong until:
@@ -14,11 +16,32 @@ import { BookingService } from "./booking.service.js";
 //      b) Either side rejects → negotiation REJECTED, booking can still be
 //         accepted at listed price (owner's prerogative) or cancelled
 //
-// Invariant: only ONE open negotiation per booking at a time.
+// Invariants:
+//   - only ONE open negotiation per booking at a time
+//   - prices can only change while the booking is BOOKING_REQUESTED and unpaid;
+//     once accepted/funded the amount is frozen (it is what the renter pays/paid)
+
+/** The only state in which the price of a booking may still change */
+const NEGOTIABLE = { bookingStatus: "BOOKING_REQUESTED", financialStatus: "PENDING_PAYMENT" } as const;
+
+/** Offers below this share of the listed daily rent are refused */
+export const MIN_OFFER_RATIO = 0.3;
+
+function assertNegotiable(booking: { bookingStatus: string; financialStatus: string }) {
+  if (booking.bookingStatus !== NEGOTIABLE.bookingStatus || booking.financialStatus !== NEGOTIABLE.financialStatus) {
+    throw conflict("Negotiation is only possible before the owner accepts the booking", "NOT_NEGOTIABLE");
+  }
+}
 
 export class NegotiationService {
-  /** Get full negotiation thread for a booking (public to both parties) */
-  static async getByBookingId(bookingId: string) {
+  /** Full negotiation thread for a booking — only for the renter and the owner */
+  static async getByBookingId(bookingId: string, userId: string) {
+    const booking = await prisma.bookingRequest.findFirst({
+      where: { id: bookingId, OR: [{ seeker: { ownerId: userId } }, { provider: { ownerId: userId } }] },
+      select: { id: true },
+    });
+    if (!booking) throw notFound("Booking not found");
+
     return prisma.negotiation.findUnique({
       where: { bookingId },
       include: {
@@ -44,24 +67,37 @@ export class NegotiationService {
     offeredAmountPaise: number,
     message?: string
   ) {
-    if (offeredAmountPaise <= 0) throw new Error("Offer amount must be greater than 0");
+    if (offeredAmountPaise <= 0) throw unprocessable("Offer amount must be greater than 0", "INVALID_OFFER");
 
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("You must have a business to negotiate");
+    if (!business) throw forbidden("You must have a business to negotiate", "NO_BUSINESS");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
-      include: { seeker: true, provider: true, negotiation: { include: { offers: { orderBy: { createdAt: "desc" }, take: 1 } } } },
+      include: {
+        resource: { select: { rentAmountPaise: true } },
+        negotiation: { include: { offers: { orderBy: { createdAt: "desc" }, take: 1 } } },
+      },
     });
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("You are not a party to this booking");
+    if (!isSeeker && !isProvider) throw notFound("Booking not found");
 
-    // Negotiation only allowed while booking is in BOOKING_REQUESTED state
-    if (!["BOOKING_REQUESTED", "BOOKING_ACCEPTED"].includes(booking.bookingStatus)) {
-      throw new Error("Negotiation is only possible before the booking is funded");
+    assertNegotiable(booking);
+
+    const listedDaily = booking.resource.rentAmountPaise;
+    if (listedDaily > 0 && offeredAmountPaise < Math.ceil(listedDaily * MIN_OFFER_RATIO)) {
+      throw unprocessable(
+        `Offers must be at least ${Math.round(MIN_OFFER_RATIO * 100)}% of the listed daily rate (₹${(Math.ceil(listedDaily * MIN_OFFER_RATIO) / 100).toLocaleString()})`,
+        "OFFER_TOO_LOW"
+      );
+    }
+    const totalDays = booking.totalDays ?? 1;
+    const newTotal = offeredAmountPaise * totalDays + booking.securityDepositPaise + booking.transportFeePaise;
+    if (!Number.isSafeInteger(newTotal) || newTotal > MAX_ORDER_PAISE) {
+      throw unprocessable("Offer amount is too large", "INVALID_OFFER");
     }
 
     const proposerRole = isSeeker ? "SEEKER" : "PROVIDER";
@@ -76,21 +112,22 @@ export class NegotiationService {
           include: { offers: { include: { proposer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
         }) as any;
       } else if (negotiation.status !== "OPEN") {
-        throw new Error("This negotiation is no longer open");
+        throw conflict("This negotiation is no longer open", "NEGOTIATION_CLOSED");
       }
 
       // ── Validate turn-order: caller must be the OTHER party from the last offer ──
       const lastOffer = negotiation!.offers?.[0];
       if (lastOffer && lastOffer.proposerRole === proposerRole) {
-        throw new Error("It is not your turn — wait for the other party to respond");
+        throw conflict("It is not your turn — wait for the other party to respond", "NOT_YOUR_TURN");
       }
 
-      // ── Mark previous pending offer as COUNTERED ──
-      if (lastOffer && lastOffer.status === "PENDING") {
-        await tx.negotiationOffer.update({
-          where: { id: lastOffer.id },
+      // ── Mark previous pending offer as COUNTERED (atomically, so two counters can't race) ──
+      if (lastOffer) {
+        const countered = await tx.negotiationOffer.updateMany({
+          where: { id: lastOffer.id, status: "PENDING" },
           data: { status: "COUNTERED" },
         });
+        if (countered.count !== 1) throw conflict("The offer was already answered. Please refresh.", "OFFER_CHANGED");
       }
 
       // ── Create new offer ──
@@ -124,11 +161,11 @@ export class NegotiationService {
    * Accept the current pending offer.
    * - Updates the booking's rentAmountPaise to the agreed price.
    * - Closes the negotiation as ACCEPTED.
-   * - Transitions booking to BOOKING_ACCEPTED.
+   * - Transitions booking to BOOKING_ACCEPTED (with the same capacity check as a normal accept).
    */
   static async acceptOffer(userId: string, bookingId: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found");
+    if (!business) throw forbidden("No business found", "NO_BUSINESS");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
@@ -140,45 +177,50 @@ export class NegotiationService {
         },
       },
     });
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("Not your booking");
+    if (!isSeeker && !isProvider) throw notFound("Booking not found");
+
+    assertNegotiable(booking);
 
     const neg = booking.negotiation;
-    if (!neg || neg.status !== "OPEN") throw new Error("No open negotiation");
+    if (!neg || neg.status !== "OPEN") throw conflict("No open negotiation", "NEGOTIATION_CLOSED");
 
     const latestOffer = neg.offers[0];
     if (!latestOffer || latestOffer.status !== "PENDING")
-      throw new Error("No pending offer to accept");
+      throw conflict("No pending offer to accept", "NO_PENDING_OFFER");
 
     // The acceptor must be the OPPOSITE party of the proposer
     const callerRole = isSeeker ? "SEEKER" : "PROVIDER";
     if (latestOffer.proposerRole === callerRole)
-      throw new Error("You cannot accept your own offer");
+      throw forbidden("You cannot accept your own offer", "OWN_OFFER");
+
+    // Recalculate totals based on agreed daily rate
+    const totalDays = booking.totalDays ?? 1;
+    const newRentPaise  = latestOffer.offeredAmountPaise * totalDays;
+    const newTotalPaise = newRentPaise + booking.securityDepositPaise + booking.transportFeePaise;
+    if (newTotalPaise < MIN_ORDER_PAISE || newTotalPaise > MAX_ORDER_PAISE) {
+      throw unprocessable("The negotiated total is out of range", "INVALID_OFFER");
+    }
 
     return prisma.$transaction(async (tx) => {
-      // Mark offer accepted
-      await tx.negotiationOffer.update({
-        where: { id: latestOffer.id },
+      // Same overbooking protection as the owner's normal accept
+      await lockResource(tx, booking.resourceId);
+      const resource = await tx.resource.findUnique({ where: { id: booking.resourceId } });
+      if (!resource) throw notFound("Resource not found");
+      await assertCapacity(tx, resource, booking.quantity, booking.startDate, booking.endDate, bookingId);
+
+      // Claim the offer and the booking state atomically
+      const offerClaim = await tx.negotiationOffer.updateMany({
+        where: { id: latestOffer.id, status: "PENDING" },
         data: { status: "ACCEPTED" },
       });
+      if (offerClaim.count !== 1) throw conflict("This offer was already answered. Please refresh.", "OFFER_CHANGED");
 
-      // Close negotiation
-      await tx.negotiation.update({
-        where: { id: neg.id },
-        data: { status: "ACCEPTED" },
-      });
-
-      // Recalculate totals based on agreed daily rate
-      const totalDays = booking.totalDays ?? 1;
-      const newRentPaise  = latestOffer.offeredAmountPaise * totalDays;
-      const newTotalPaise = newRentPaise + booking.securityDepositPaise + booking.transportFeePaise;
-
-      // Update booking price + accept
-      const updated = await tx.bookingRequest.update({
-        where: { id: bookingId },
+      const bookingClaim = await tx.bookingRequest.updateMany({
+        where: { id: bookingId, ...NEGOTIABLE },
         data: {
           rentAmountPaise:  newRentPaise,
           totalAmountPaise: newTotalPaise,
@@ -187,6 +229,14 @@ export class NegotiationService {
           bookingStatus:    "BOOKING_ACCEPTED",
           status:           "accepted",
         },
+      });
+      if (bookingClaim.count !== 1) {
+        throw conflict("Negotiation is only possible before the owner accepts the booking", "NOT_NEGOTIABLE");
+      }
+
+      await tx.negotiation.update({
+        where: { id: neg.id },
+        data: { status: "ACCEPTED" },
       });
 
       await BookingService.recordTimelineEvent(
@@ -198,7 +248,7 @@ export class NegotiationService {
         `${business.name} accepted the offer of ₹${(latestOffer.offeredAmountPaise / 100).toLocaleString()}/day. Booking confirmed at agreed price.`
       );
 
-      return updated;
+      return tx.bookingRequest.findUniqueOrThrow({ where: { id: bookingId } });
     });
   }
 
@@ -208,30 +258,30 @@ export class NegotiationService {
    */
   static async rejectNegotiation(userId: string, bookingId: string, reason?: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found");
+    if (!business) throw forbidden("No business found", "NO_BUSINESS");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: bookingId },
       include: { negotiation: true },
     });
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throw notFound("Booking not found");
 
     const isSeeker   = booking.seekerId   === business.id;
     const isProvider = booking.providerId === business.id;
-    if (!isSeeker && !isProvider) throw new Error("Not your booking");
+    if (!isSeeker && !isProvider) throw notFound("Booking not found");
 
     const neg = booking.negotiation;
-    if (!neg || neg.status !== "OPEN") throw new Error("No open negotiation to reject");
+    if (!neg || neg.status !== "OPEN") throw conflict("No open negotiation to reject", "NEGOTIATION_CLOSED");
 
     await prisma.$transaction(async (tx) => {
-      // Mark latest pending offer rejected
-      await tx.negotiationOffer.updateMany({
-        where: { negotiationId: neg.id, status: "PENDING" },
+      const closed = await tx.negotiation.updateMany({
+        where: { id: neg.id, status: "OPEN" },
         data: { status: "REJECTED" },
       });
+      if (closed.count !== 1) throw conflict("No open negotiation to reject", "NEGOTIATION_CLOSED");
 
-      await tx.negotiation.update({
-        where: { id: neg.id },
+      await tx.negotiationOffer.updateMany({
+        where: { negotiationId: neg.id, status: "PENDING" },
         data: { status: "REJECTED" },
       });
     });

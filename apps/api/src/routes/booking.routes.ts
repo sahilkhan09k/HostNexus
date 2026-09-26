@@ -1,11 +1,13 @@
 import { Router, type IRouter } from "express";
 import { BookingController } from "../controllers/booking.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
+import { paymentLimiter, writeLimiter } from "../middleware/rate-limit.js";
 
 const router: IRouter = Router();
 
 // All booking routes require authentication
 router.use(authenticate);
+router.use(writeLimiter);
 
 // ── CRUD ──────────────────────────────────────────────────────────────
 // Create booking request
@@ -23,11 +25,11 @@ router.patch("/:id/status", BookingController.updateBookingStatus);
 
 // ── RAZORPAY PAYMENT — TWO-STEP ───────────────────────────────────────
 // Step 1: Create Razorpay order (returns orderId + keyId for frontend checkout)
-router.post("/:id/pay", BookingController.createPaymentOrder);
+router.post("/:id/pay", paymentLimiter, BookingController.createPaymentOrder);
 
 // Step 2: Verify Razorpay signature and fund escrow
 //         Body: { razorpayOrderId, razorpayPaymentId, razorpaySignature }
-router.post("/:id/pay/verify", BookingController.verifyPayment);
+router.post("/:id/pay/verify", paymentLimiter, BookingController.verifyPayment);
 
 // ── HANDOVER & INSPECTION ─────────────────────────────────────────────
 // Owner marks resource handed over (starts 1-hr renter inspection timer)
@@ -53,8 +55,7 @@ router.post("/:id/damage-claim", BookingController.ownerDamageClaim);
 // Renter responds to damage claim (Accept deduction or dispute)
 router.post("/:id/claim-response", BookingController.renterRespondClaim);
 
-// Customer Care / Admin resolves dispute (requires Admin JWT)
-router.post("/:id/resolve-dispute", BookingController.adminResolveDispute);
+// Customer Care dispute resolution lives in admin.routes.ts (POST /api/admin/bookings/:id/resolve-dispute)
 
 // Report non-return (owner — after rental period ends)
 router.post("/:id/non-return", BookingController.reportNonReturn);

@@ -24,14 +24,21 @@ model User {
   gstCertificateUrl   String?  // GST Certificate — primary B2B identity doc
   aadhaarUrl          String?  // Aadhaar — legacy, no longer collected
   gstin               String?  @unique // extracted from the certificate, verified via gstinapi.in
+  gstLegalName        String?  // legal name returned by the GST registry
+  gstTradeName        String?  // trade name returned by the GST registry
 
   // Owner personal info
   ownerName  String?
   phone      String?
 
+  // Incremented to revoke every outstanding access/refresh token (reject, logout-all, password change)
+  tokenVersion Int        @default(0)
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   businesses   Business[]
+  refreshTokens RefreshToken[]
+  uploads      Upload[]
 
   @@index([verificationStatus])
   @@map("users")
@@ -42,10 +49,71 @@ model Admin {
   email        String   @unique
   passwordHash String
   name         String
+  tokenVersion Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@map("admins")
+}
+
+// Server-side record of every refresh token issued, so tokens can be rotated,
+// revoked on logout/reject, and reuse of an already-rotated token detected.
+model RefreshToken {
+  id         String    @id @default(cuid()) // jti claim
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId   String    // all tokens descending from one login share a family
+  tokenHash  String    @unique // sha256 of the JWT, never the token itself
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedById String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+// Every file accepted by the upload endpoints. The id is the stored filename.
+model Upload {
+  id         String   @id // e.g. "3f0c...-....jpg"
+  ownerId    String?  // null only for pre-registration KYC uploads
+  owner      User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  purpose    String   // MEDIA | KYC
+  mimeType   String
+  sizeBytes  Int
+  sha256     String
+  createdAt  DateTime @default(now())
+
+  @@index([ownerId])
+  @@map("uploads")
+}
+
+// Security-relevant events (logins, admin actions, payment state changes)
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  actorType  String   // USER | ADMIN | SYSTEM | ANONYMOUS
+  actorId    String?
+  targetType String?
+  targetId   String?
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([actorId])
+  @@map("audit_logs")
+}
+
+// Razorpay webhook deliveries already processed (idempotency)
+model RazorpayWebhookEvent {
+  id         String   @id // x-razorpay-event-id
+  event      String
+  receivedAt DateTime @default(now())
+
+  @@map("razorpay_webhook_events")
 }
 
 model Business {
@@ -87,6 +155,7 @@ model Resource {
   status       String   @default("available")
   location     String?
   isActive     Boolean  @default(true)
+  deletedAt    DateTime? // soft delete — resources with booking history are never hard-deleted
 
   // Commercial terms & Chain of custody pre-existing conditions (paise: 1 INR = 100 paise)
   rentAmountPaise       Int      @default(0)
@@ -131,11 +200,11 @@ model AvailabilityWindow {
 model BookingRequest {
   id              String   @id @default(cuid())
   seekerId        String
-  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Cascade)
+  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Restrict)
   providerId      String
-  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Restrict)
   resourceId      String
-  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
   
   quantity        Int
   startDate       DateTime
@@ -161,6 +230,10 @@ model BookingRequest {
   transportDistanceKm     Float?
   transportRatePerKmPaise Int    @default(0)
   transportFeePaise       Int    @default(0)
+
+  // Razorpay order created for this booking and the payment that funded it
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String? @unique
 
   // Legacy prices
   proposedPrice   Float?
@@ -207,7 +280,7 @@ model BookingRequest {
 model Inspection {
   id            String         @id @default(cuid())
   bookingId     String
-  booking       BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking       BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   type          String         // RECEIVING, RETURN
   performedById String
   status        String         // ACCEPTED, REPORTED_ISSUE
@@ -224,7 +297,7 @@ model Inspection {
 model Evidence {
   id           String          @id @default(cuid())
   bookingId    String
-  booking      BookingRequest  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking      BookingRequest  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   inspectionId String?
   inspection   Inspection?     @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
   uploadedById String
@@ -243,7 +316,7 @@ model Evidence {
 model DamageClaim {
   id                 String         @id @default(cuid())
   bookingId          String
-  booking            BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking            BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   claimantId         String
   claimType          String         // DAMAGE, MISSING_ITEM, MISSING_QUANTITY, WRONG_ITEM_RETURNED, SEVERE_STAIN, RETURN_NOT_RECEIVED, OTHER
   description        String
@@ -260,7 +333,7 @@ model DamageClaim {
 model Dispute {
   id                    String         @id @default(cuid())
   bookingId             String
-  booking               BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking               BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   damageClaimId         String?
   damageClaim           DamageClaim?   @relation(fields: [damageClaimId], references: [id], onDelete: SetNull)
   status                String         @default("OPEN") // OPEN, RESOLVED
@@ -280,11 +353,11 @@ model Dispute {
 model PaymentTransaction {
   id                String         @id @default(cuid())
   bookingId         String
-  booking           BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking           BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   type              String         // ESCROW_DEPOSIT, RENT_PAYOUT, DEPOSIT_REFUND, DAMAGE_PAYOUT, PARTIAL_SETTLEMENT
   amountPaise       Int
   status            String         @default("COMPLETED") // PENDING, COMPLETED, FAILED
-  providerReference String?
+  providerReference String?        @unique // one row per booking+event (e.g. RENT_PAYOUT_<id>) or Razorpay id
   createdAt         DateTime       @default(now())
 
   @@index([bookingId])
@@ -294,7 +367,7 @@ model PaymentTransaction {
 model BookingTimelineEvent {
   id          String         @id @default(cuid())
   bookingId   String
-  booking     BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking     BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   eventType   String         // BOOKING_CREATED, ESCROW_FUNDED, HANDOVER_MARKED, RECEIVING_ACCEPTED, RECEIVING_ISSUE, RETURN_INITIATED, OWNER_RECEIPT_CONFIRMED, OWNER_RETURN_ACCEPTED, DAMAGE_CLAIMED, CLAIM_DISPUTED, DISPUTE_RESOLVED, AUTO_TIMEOUT_RELEASE, NON_RETURN_REPORTED
   actorId     String?
   actorRole   String         // OWNER, RENTER, ADMIN, SYSTEM
@@ -314,7 +387,7 @@ model BookingTimelineEvent {
 model Review {
   id         String   @id @default(cuid())
   bookingId  String
-  booking    BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking    BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   reviewerId String   // businessId of the person writing the review
   reviewer   Business @relation("ReviewsGiven",    fields: [reviewerId], references: [id], onDelete: Cascade)
@@ -346,7 +419,7 @@ model Review {
 model Negotiation {
   id        String   @id @default(cuid())
   bookingId String   @unique
-  booking   BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking   BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   // OPEN | ACCEPTED | REJECTED | CANCELLED
   status    String   @default("OPEN")

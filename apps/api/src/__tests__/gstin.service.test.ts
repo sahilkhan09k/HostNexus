@@ -79,20 +79,28 @@ describe("GstinService.verify", () => {
 });
 
 describe("GstinService.extractFromDocument (file type)", () => {
-  it("rejects uploads that are not PDFs", async () => {
+  it("rejects KYC uploads that are not PDFs", async () => {
     const fs = await import("fs/promises");
     const path = await import("path");
-    const dir = path.join(process.cwd(), "uploads");
-    await fs.mkdir(dir, { recursive: true });
-    const name = `test-not-pdf-${Date.now()}.png`;
-    await fs.writeFile(path.join(dir, name), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const crypto = await import("crypto");
+    const { KYC_DIR } = await import("../services/upload.service.js");
+    await fs.mkdir(KYC_DIR, { recursive: true });
+    const name = `${crypto.randomUUID()}.pdf`;
+    // PNG bytes behind a .pdf name — the content check must catch it
+    await fs.writeFile(path.join(KYC_DIR, name), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     try {
-      await expect(GstinService.extractFromDocument(`/uploads/${name}`)).rejects.toMatchObject({
+      await expect(GstinService.extractFromDocument(`/kyc/${name}`)).rejects.toMatchObject({
         code: "GSTIN_DOCUMENT_INVALID",
         message: "Please upload your GST registration certificate as a PDF.",
       });
     } finally {
-      await fs.unlink(path.join(dir, name));
+      await fs.unlink(path.join(KYC_DIR, name));
+    }
+  });
+
+  it("refuses public /uploads paths and traversal attempts for KYC documents", async () => {
+    for (const ref of ["/uploads/x.pdf", "/kyc/../../.env", "/kyc/not-a-uuid.pdf", "C:\secret.pdf"]) {
+      await expect(GstinService.extractFromDocument(ref)).rejects.toMatchObject({ code: "GSTIN_DOCUMENT_INVALID" });
     }
   });
 });

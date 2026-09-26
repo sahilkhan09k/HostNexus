@@ -1,10 +1,33 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { env } from "../config/env.js";
+import { httpError } from "../utils/http-error.js";
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "placeholder_secret",
-});
+let client: Razorpay | null = null;
+
+/** Lazily constructed so a missing key fails the payment request, not server start-up in dev. */
+function razorpay(): Razorpay {
+  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
+    throw httpError(503, "PAYMENTS_UNAVAILABLE", "Payments are not configured");
+  }
+  client ??= new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET });
+  return client;
+}
+
+/** Constant-time comparison of two hex/ASCII strings */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+export interface RazorpayPaymentSummary {
+  id: string;
+  order_id: string | null;
+  status: string;
+  amount: number;
+  currency: string;
+}
 
 export class RazorpayService {
   /**
@@ -20,7 +43,7 @@ export class RazorpayService {
     currency: string;
     keyId: string;
   }> {
-    const order = await razorpay.orders.create({
+    const order = await razorpay().orders.create({
       amount: amountPaise,           // Razorpay expects amount in paise
       currency: "INR",
       receipt: `bk_${bookingId.slice(0, 30)}`,
@@ -34,14 +57,12 @@ export class RazorpayService {
       orderId: order.id,
       amount: order.amount as number,
       currency: order.currency,
-      keyId: process.env.RAZORPAY_KEY_ID!,
+      keyId: env.RAZORPAY_KEY_ID!,
     };
   }
 
   /**
-   * Verify Razorpay payment signature (HMAC-SHA256).
-   * Must be called after the frontend completes the checkout.
-   *
+   * Verify Razorpay checkout signature (HMAC-SHA256, constant-time compare).
    * Signature = HMAC_SHA256(razorpay_order_id + "|" + razorpay_payment_id, key_secret)
    */
   static verifySignature(
@@ -49,19 +70,50 @@ export class RazorpayService {
     razorpayPaymentId: string,
     razorpaySignature: string
   ): boolean {
-    const body = `${razorpayOrderId}|${razorpayPaymentId}`;
+    if (!env.RAZORPAY_KEY_SECRET) {
+      throw httpError(503, "PAYMENTS_UNAVAILABLE", "Payments are not configured");
+    }
     const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
-      .update(body)
+      .createHmac("sha256", env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
       .digest("hex");
 
-    return expectedSignature === razorpaySignature;
+    return safeEqual(expectedSignature, razorpaySignature);
+  }
+
+  /** Verify a webhook delivery against the RAW request body. */
+  static verifyWebhookSignature(rawBody: Buffer, signature: string): boolean {
+    if (!env.RAZORPAY_WEBHOOK_SECRET) {
+      throw httpError(503, "PAYMENTS_UNAVAILABLE", "Webhook secret is not configured");
+    }
+    const expected = crypto.createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    return safeEqual(expected, signature);
   }
 
   /**
-   * Fetch a payment from Razorpay to confirm captured status.
+   * Fetch a payment from Razorpay (server-to-server) so amount, currency,
+   * order and status come from Razorpay rather than the browser.
    */
-  static async fetchPayment(paymentId: string) {
-    return razorpay.payments.fetch(paymentId);
+  static async fetchPayment(paymentId: string): Promise<RazorpayPaymentSummary> {
+    const p = (await razorpay().payments.fetch(paymentId)) as any;
+    return {
+      id: String(p.id),
+      order_id: p.order_id ? String(p.order_id) : null,
+      status: String(p.status),
+      amount: Number(p.amount),
+      currency: String(p.currency),
+    };
+  }
+
+  /** Capture an authorized payment (no-op path when the order auto-captures). */
+  static async capturePayment(paymentId: string, amountPaise: number): Promise<RazorpayPaymentSummary> {
+    const p = (await razorpay().payments.capture(paymentId, amountPaise, "INR")) as any;
+    return {
+      id: String(p.id),
+      order_id: p.order_id ? String(p.order_id) : null,
+      status: String(p.status),
+      amount: Number(p.amount),
+      currency: String(p.currency),
+    };
   }
 }

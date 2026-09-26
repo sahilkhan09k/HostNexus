@@ -4,7 +4,8 @@ import { PrismaClient } from "@prisma/client";
 // Prevents creating multiple instances across services
 const prismaClientSingleton = () => {
   return new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+    // Query logging prints parameters (emails, amounts...) — opt-in only, never implied by NODE_ENV
+    log: process.env.PRISMA_LOG_QUERIES === "true" ? ["query", "error", "warn"] : ["error", "warn"],
   });
 };
 

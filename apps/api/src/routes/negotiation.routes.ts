@@ -1,10 +1,12 @@
 import { Router, type IRouter } from "express";
 import { NegotiationController } from "../controllers/negotiation.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
+import { writeLimiter } from "../middleware/rate-limit.js";
 
 const router: IRouter = Router();
 
 router.use(authenticate);
+router.use(writeLimiter);
 
 // GET thread for a booking
 router.get("/:bookingId", NegotiationController.get);

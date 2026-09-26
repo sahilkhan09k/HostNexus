@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { createBookingRequest, makeNegotiationOffer } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -379,7 +380,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
               {/* ── Resource banner ── */}
               <div className="flex items-start gap-4 p-3.5 rounded-xl border border-stone-200 bg-stone-50/50">
                 {resource.photos?.[0] ? (
-                  <img src={resource.photos[0]} alt={resource.name}
+                  <img src={mediaUrl(resource.photos[0])} alt={resource.name}
                     className="w-16 h-16 rounded-lg object-cover border border-stone-200 shrink-0" />
                 ) : (
                   <div className="w-16 h-16 rounded-lg bg-stone-200 shrink-0 flex items-center justify-center text-xs text-stone-400 font-bold">IMG</div>
@@ -414,7 +415,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                   {resource.damagePhotos && resource.damagePhotos.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto pt-1">
                       {resource.damagePhotos.map((p, i) => (
-                        <img key={i} src={p} alt="wear" className="w-14 h-14 rounded-lg object-cover border border-amber-300 shrink-0" />
+                        <img key={i} src={mediaUrl(p)} alt="wear" className="w-14 h-14 rounded-lg object-cover border border-amber-300 shrink-0" />
                       ))}
                     </div>
                   )}

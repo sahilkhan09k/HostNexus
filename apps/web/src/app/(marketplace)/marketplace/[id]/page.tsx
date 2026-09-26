@@ -15,6 +15,7 @@ import { Footer } from "@/components/layout/footer";
 import { BookingModal } from "@/components/marketplace/booking-modal";
 import { AuthService } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -416,7 +417,7 @@ export default function ResourceDetailPage() {
                 className="relative aspect-video overflow-hidden rounded-2xl border border-stone-200 bg-stone-100 shadow-sm"
               >
                 {photo ? (
-                  <img src={photo} alt={resource.name} className="h-full w-full object-cover" />
+                  <img src={mediaUrl(photo)} alt={resource.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center gap-2 text-stone-400">
                     <Package className="h-10 w-10" />
@@ -454,7 +455,7 @@ export default function ResourceDetailPage() {
                           : "border-stone-200 opacity-60 hover:opacity-100"
                       )}
                     >
-                      <img src={p} alt="" className="h-full w-full object-cover" />
+                      <img src={mediaUrl(p)} alt="" className="h-full w-full object-cover" />
                     </button>
                   ))}
                 </div>
@@ -537,7 +538,7 @@ export default function ResourceDetailPage() {
                     <div className="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-4">
                       {resource.damagePhotos.map((dp, i) => (
                         <div key={i} className="aspect-square overflow-hidden rounded-lg border border-amber-200">
-                          <img src={dp} alt={`Damage ${i + 1}`} className="h-full w-full object-cover" />
+                          <img src={mediaUrl(dp)} alt={`Damage ${i + 1}`} className="h-full w-full object-cover" />
                         </div>
                       ))}
                     </div>

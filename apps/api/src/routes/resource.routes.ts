@@ -1,17 +1,19 @@
-﻿import { Router, type IRouter } from "express";
+import { Router, type IRouter } from "express";
 import { ResourceController } from "../controllers/resource.controller.js";
 import { AvailabilityController } from "../controllers/availability.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
+import { writeLimiter, publicReadLimiter } from "../middleware/rate-limit.js";
 
 const router: IRouter = Router();
 
 // ── Public availability endpoints (no auth needed for calendar/check) ──
-router.get("/:id/availability/check",    AvailabilityController.checkAvailability);
-router.get("/:id/availability/calendar", AvailabilityController.getCalendar);
-router.get("/:id/availability",          AvailabilityController.getWindows);
+router.get("/:id/availability/check",    publicReadLimiter, AvailabilityController.checkAvailability);
+router.get("/:id/availability/calendar", publicReadLimiter, AvailabilityController.getCalendar);
+router.get("/:id/availability",          publicReadLimiter, AvailabilityController.getWindows);
 
 // All resource routes below require authentication
 router.use(authenticate);
+router.use(writeLimiter);
 
 // Create resource
 router.post("/", ResourceController.createResource);

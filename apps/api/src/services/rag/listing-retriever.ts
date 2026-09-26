@@ -137,8 +137,9 @@ export class ListingRetriever {
         // Format prices
         const rentPaise = res.rentAmountPaise || 0;
         const depositPaise = res.securityDepositPaise || 0;
-        const rentRupees = rentPaise > 0 ? `₹${(rentPaise / 100).toLocaleString("en-IN")}` : "₹1,500";
-        const depositRupees = depositPaise > 0 ? `₹${(depositPaise / 100).toLocaleString("en-IN")}` : "₹500";
+        // Never invent prices: show what the owner actually listed
+        const rentRupees = rentPaise > 0 ? `₹${(rentPaise / 100).toLocaleString("en-IN")}` : "Price on request";
+        const depositRupees = depositPaise > 0 ? `₹${(depositPaise / 100).toLocaleString("en-IN")}` : "No deposit";
         const unitStr = res.unit ? `/${res.unit}` : "/day";
 
         // Calculate average owner rating
@@ -146,7 +147,7 @@ export class ListingRetriever {
         const renterReviews = reviews.filter((r: any) => r.reviewerRole === "RENTER");
         const avgRating = renterReviews.length
           ? +(renterReviews.reduce((sum: number, r: any) => sum + r.rating, 0) / renterReviews.length).toFixed(1)
-          : 4.8;
+          : 0; // no reviews yet — never fabricate a rating
 
         // Categorize aesthetics
         const { categoryColor, bg } = this.getCategoryVisuals(res.resourceType);
@@ -169,7 +170,9 @@ export class ListingRetriever {
         } else if (matchedReq?.quantity) {
           whyChoose += `Offers ${res.quantity} ${res.unit || "units"} available immediately. `;
         }
-        whyChoose += `Maintains high ratings (${avgRating}★) with escrow-backed chain of custody protection.`;
+        whyChoose += renterReviews.length
+          ? `Rated ${avgRating}★ by ${renterReviews.length} renter(s), with escrow-backed chain of custody protection.`
+          : `New listing with escrow-backed chain of custody protection.`;
 
         // Semantic match percentage bounded between 82% and 99%
         const matchPercent = Math.min(99, Math.max(82, Math.round(combinedScore * 0.7 + 25)));
@@ -179,7 +182,7 @@ export class ListingRetriever {
           title: res.name,
           business: res.business?.name || "HostNexus Verified Partner",
           businessId: res.businessId,
-          location: res.location || "Pune / Mumbai Metro",
+          location: res.location || "Location on request",
           price: `${rentRupees}${unitStr}`,
           rentAmountPaise: rentPaise,
           securityDepositPaise: depositPaise,
@@ -188,7 +191,7 @@ export class ListingRetriever {
           quantityAvailable: res.quantity,
           unit: res.unit || "unit",
           rating: avgRating,
-          reviewCount: renterReviews.length || 12,
+          reviewCount: renterReviews.length,
           match: matchPercent,
           available: res.status === "available",
           category: res.resourceType,

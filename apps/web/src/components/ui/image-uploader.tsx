@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import { Camera, Upload, X, Loader2, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { uploadMediaFile } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 interface ImageUploaderProps {
   value: string[];
@@ -148,10 +149,10 @@ export function ImageUploader({
               className="group relative aspect-square rounded-xl overflow-hidden border border-stone-200 bg-stone-100 shadow-sm"
             >
               {url.endsWith(".mp4") || url.endsWith(".webm") ? (
-                <video src={url} className="w-full h-full object-cover" />
+                <video src={mediaUrl(url)} className="w-full h-full object-cover" />
               ) : (
                 <img
-                  src={url}
+                  src={mediaUrl(url)}
                   alt={`Evidence ${idx + 1}`}
                   className="w-full h-full object-cover transition-transform group-hover:scale-105"
                 />

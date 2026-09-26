@@ -1,5 +1,6 @@
 import { prisma } from "../config/database.js";
 import type { CreateBusinessInput, UpdateBusinessInput } from "../schemas/business.schema.js";
+import { conflict, notFound } from "../utils/http-error.js";
 
 export interface SafeBusiness {
   id: string;
@@ -17,7 +18,7 @@ export interface SafeBusiness {
 export class BusinessService {
   static async createBusiness(userId: string, input: CreateBusinessInput): Promise<SafeBusiness> {
     const existing = await prisma.business.findFirst({ where: { ownerId: userId } });
-    if (existing) throw new Error("User already has a business");
+    if (existing) throw conflict("User already has a business", "BUSINESS_EXISTS");
     return prisma.business.create({
       data: { name: input.name, ownerId: userId },
     });
@@ -37,8 +38,8 @@ export class BusinessService {
     input: UpdateBusinessInput
   ): Promise<SafeBusiness> {
     const business = await prisma.business.findUnique({ where: { id: businessId } });
-    if (!business) throw new Error("Business not found");
-    if (business.ownerId !== userId) throw new Error("Unauthorized: You can only update your own business");
+    if (!business) throw notFound("Business not found");
+    if (business.ownerId !== userId) throw notFound("Business not found");
     return prisma.business.update({ where: { id: businessId }, data: input });
   }
 
