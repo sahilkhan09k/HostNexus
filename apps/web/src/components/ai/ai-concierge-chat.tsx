@@ -366,7 +366,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         {/* Header */}
         <div className="border-b border-stone-200 p-5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 shadow-sm shadow-emerald-500/20 text-white">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-700 shadow-sm shadow-emerald-500/20 text-white">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
@@ -435,8 +435,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
             <div>
               <p className="text-sm font-bold text-stone-900">HostNexus AI Concierge</p>
               <div className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] font-medium text-emerald-700">RAG Pipeline Active · Real-time Inventory &amp; Policies</span>
+                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-[11px] font-medium text-green-700">RAG Pipeline Active · Real-time Inventory &amp; Policies</span>
               </div>
             </div>
           </div>
@@ -451,7 +451,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
 
         {/* Messages Scroll View */}
         <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div className="mx-auto max-w-3xl space-y-6">
+          <div className="mx-auto max-w-5xl space-y-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
                 <motion.div
@@ -466,7 +466,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
                     className={cn(
                       "flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-xs",
                       msg.role === "assistant"
-                        ? "bg-gradient-to-br from-emerald-500 to-teal-700 text-white"
+                        ? "bg-gradient-to-br from-emerald-400 to-emerald-700 text-white"
                         : "bg-stone-800 text-white"
                     )}
                   >
@@ -481,7 +481,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
                         "rounded-2xl p-4 shadow-sm",
                         msg.role === "assistant"
                           ? "rounded-tl-sm border border-stone-200/90 bg-white"
-                          : "rounded-tr-sm bg-emerald-700 text-white font-medium"
+                          : "rounded-tr-sm bg-emerald-600 text-white font-medium"
                       )}
                     >
                       {msg.role === "assistant" ? (
@@ -558,7 +558,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
             {/* Loading state indicator */}
             {isLoading && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white shadow-xs">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-700 text-white shadow-xs">
                   <Sparkles className="h-4 w-4" />
                 </div>
                 <div className="rounded-2xl rounded-tl-sm border border-stone-200 bg-white p-3 shadow-xs">
@@ -573,7 +573,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
 
         {/* Input Bar */}
         <div className="border-t border-stone-200 bg-white p-4 md:px-8">
-          <div className="mx-auto max-w-3xl">
+          <div className="mx-auto max-w-5xl">
             {/* Quick mobile pills */}
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1 scrollbar-hide lg:hidden">
               {DEFAULT_SUGGESTIONS.slice(0, 3).map((s, idx) => (

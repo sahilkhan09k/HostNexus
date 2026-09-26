@@ -34,6 +34,13 @@ const INDIAN_STATES = [
 
 type Step = 1 | 2 | 3;
 
+const FIELD_LABELS: Record<string, string> = {
+  email: "Email", password: "Password", ownerName: "Full name", phone: "Phone",
+  businessName: "Business name", businessType: "Business type", addressLine: "Address",
+  city: "City", state: "State", pincode: "Pincode",
+  gstCertificateUrl: "GST Certificate", aadhaarUrl: "Aadhaar",
+};
+
 interface DocUploadState {
   file: File | null;
   url: string | null;
@@ -111,9 +118,9 @@ function DocUploader({
 
       {value.url ? (
         /* Uploaded state */
-        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-          <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-          <span className="flex-1 truncate text-xs font-medium text-emerald-700">
+        <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-3">
+          <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
+          <span className="flex-1 truncate text-xs font-medium text-green-700">
             {value.file?.name ?? "Document uploaded"}
           </span>
           <button
@@ -226,8 +233,11 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
+      const trimmed = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, k === "password" ? v : v.trim()])
+      );
       const payload = {
-        ...form,
+        ...trimmed,
         gstCertificateUrl: gstDoc.url,
         aadhaarUrl: aadhaarDoc.url,
       };
@@ -241,9 +251,11 @@ export default function RegisterPage() {
       const data = await res.json();
 
       if (!res.ok) {
+        // Validation errors carry the useful per-field message in details
+        const detail = data?.error?.details?.[0];
         throw new Error(
+          (detail && `${FIELD_LABELS[detail.path?.[0]] ?? detail.path?.[0]}: ${detail.message}`) ||
           data?.error?.message ||
-          data?.error?.details?.[0]?.message ||
           "Registration failed"
         );
       }
@@ -267,21 +279,21 @@ export default function RegisterPage() {
   const STEP_LABELS = ["Personal", "Business", "Documents"];
 
   return (
-    <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)] lg:grid-cols-2">
+    <div className="flex w-full max-w-6xl overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)]">
 
       {/* ── Left branding panel ── */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-stone-900 p-10 lg:flex">
+      <div className="relative hidden w-[46%] shrink-0 flex-col justify-between overflow-hidden bg-stone-900 p-10 lg:flex xl:p-12">
         <div
           className="absolute inset-0 opacity-[0.06]"
           style={{ backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 opacity-90" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#16334A] via-[#0C1A26] to-[#0B0D11] opacity-95" />
 
         <div className="relative z-10">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/30">
-            <span className="text-lg font-black text-emerald-400">H</span>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
+            <span className="text-lg font-medium text-white">H</span>
           </div>
-          <h2 className="mt-8 font-display text-3xl font-extrabold leading-tight text-white">
+          <h2 className="mt-8 font-display text-4xl font-semibold leading-[1.1] text-white">
             Join India&apos;s Hospitality Network
           </h2>
           <p className="mt-3 text-base leading-relaxed text-stone-400">
@@ -324,7 +336,7 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Right form panel ── */}
-      <div className="flex flex-col justify-center overflow-y-auto p-8 md:p-10">
+      <div className="flex min-w-0 flex-1 flex-col justify-center overflow-y-auto p-8 md:p-12">
         {/* Mobile step indicator */}
         <div className="mb-5 flex items-center gap-2 lg:hidden">
           {([1, 2, 3] as Step[]).map((s) => (
@@ -333,7 +345,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="mb-5">
-          <h1 className="font-display text-2xl font-bold text-stone-900">
+          <h1 className="font-display text-3xl font-semibold text-stone-900">
             {step === 1 && "Create your account"}
             {step === 2 && "Business details"}
             {step === 3 && "Document verification"}
@@ -375,7 +387,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Your full name" value={form.ownerName} onChange={set("ownerName")} className={inputCls} />
+                  <input type="text" required minLength={2} placeholder="Your full name" value={form.ownerName} onChange={set("ownerName")} className={inputCls} />
                 </div>
               </div>
 
@@ -383,7 +395,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Email</label>
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="email" required placeholder="you@yourbusiness.com" value={form.email} onChange={set("email")} className={inputCls} />
+                  <input type="email" required pattern="[^@\s]+@[^@\s]+\.[^@\s]{2,}" title="Enter a valid email like you@business.com" placeholder="you@yourbusiness.com" value={form.email} onChange={set("email")} className={inputCls} />
                 </div>
               </div>
 
@@ -391,7 +403,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Mobile Number</label>
                 <div className="relative">
                   <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="tel" required placeholder="+91 98765 43210" value={form.phone} onChange={set("phone")}
+                  <input type="tel" required placeholder="9876543210" value={form.phone} onChange={set("phone")}
                     pattern="[0-9]{10,13}" title="Enter a valid 10-digit mobile number" className={inputCls} />
                 </div>
               </div>
@@ -419,7 +431,7 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Name</label>
                 <div className="relative">
                   <Building className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Your registered business name" value={form.businessName} onChange={set("businessName")} className={inputCls} />
+                  <input type="text" required minLength={2} placeholder="Your registered business name" value={form.businessName} onChange={set("businessName")} className={inputCls} />
                 </div>
               </div>
 
@@ -436,14 +448,14 @@ export default function RegisterPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Business Address</label>
                 <div className="relative">
                   <MapPin className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  <input type="text" required placeholder="Street / Area / Locality" value={form.addressLine} onChange={set("addressLine")} className={inputCls} />
+                  <input type="text" required minLength={5} title="Enter at least 5 characters" placeholder="Street / Area / Locality" value={form.addressLine} onChange={set("addressLine")} className={inputCls} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">City</label>
-                  <input type="text" required placeholder="Pune" value={form.city} onChange={set("city")}
+                  <input type="text" required minLength={2} placeholder="Pune" value={form.city} onChange={set("city")}
                     className="w-full rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-800 placeholder:text-stone-400 focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all" />
                 </div>
                 <div>
@@ -511,8 +523,8 @@ export default function RegisterPage() {
             disabled={submitting || gstDoc.uploading || aadhaarDoc.uploading}
             className={cn(
               "flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white",
-              "bg-emerald-600 shadow-[0_2px_8px_rgba(5,150,105,0.30)]",
-              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(5,150,105,0.40)]",
+              "bg-emerald-600 shadow-[0_2px_8px_rgba(235,131,34,0.30)]",
+              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(235,131,34,0.40)]",
               "transition-all duration-200 active:scale-[0.98]",
               "disabled:opacity-60 disabled:cursor-not-allowed"
             )}

@@ -122,7 +122,7 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
     empty:       "",
     past:        "text-stone-300 cursor-default",
     unavailable: "text-stone-300 cursor-default bg-stone-50",
-    available:   "bg-emerald-50 text-emerald-800 font-semibold hover:bg-emerald-100 cursor-pointer",
+    available:   "bg-green-50 text-green-800 font-semibold hover:bg-green-100 cursor-pointer",
     booked:      "bg-rose-100 text-rose-600 line-through cursor-not-allowed",
   };
 
@@ -170,7 +170,7 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
       {/* Legend */}
       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-stone-100 pt-3">
         {[
-          { color: "bg-emerald-100", label: "Available" },
+          { color: "bg-green-100", label: "Available" },
           { color: "bg-rose-100",    label: "Booked" },
           { color: "bg-stone-100",   label: "Unavailable" },
         ].map(({ color, label }) => (
@@ -233,7 +233,7 @@ function OwnerProfileCard({ businessId, businessName, city, state, businessType 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="font-bold text-stone-900 truncate">{businessName}</p>
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-green-600" />
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-stone-400 mt-0.5">
             {businessType && <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{businessType}</span>}
@@ -277,7 +277,7 @@ function OwnerProfileCard({ businessId, businessName, city, state, businessType 
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="flex flex-col items-center gap-1 py-2.5">
                 <Icon className={cn("h-3.5 w-3.5", color)} />
-                <span className="font-mono text-base font-extrabold text-stone-900 tabular-nums">{value}</span>
+                <span className="text-base font-semibold text-stone-900 tabular-nums">{value}</span>
                 <span className="text-[9px] text-stone-400 leading-none text-center">{label}</span>
               </div>
             ))}
@@ -347,7 +347,7 @@ export default function ResourceDetailPage() {
   // ── Loading ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF9] flex flex-col">
+      <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
         <Navbar />
         <div className="flex flex-1 items-center justify-center pt-24">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
@@ -360,7 +360,7 @@ export default function ResourceDetailPage() {
   // ── Error ──
   if (error || !resource) {
     return (
-      <div className="min-h-screen bg-[#FAFAF9] flex flex-col">
+      <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
         <Navbar />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 pt-24 text-center px-4">
           <div className="rounded-full bg-rose-50 p-4 text-rose-500">
@@ -385,10 +385,10 @@ export default function ResourceDetailPage() {
     .slice(0, 2);
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9] flex flex-col">
+    <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
       <Navbar />
 
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pt-24 pb-16">
+      <main className="flex-1 app-container pt-24 pb-16">
 
         {/* Breadcrumb */}
         <div className="mb-6 flex items-center gap-2 text-xs text-stone-400">
@@ -488,8 +488,8 @@ export default function ResourceDetailPage() {
                 </div>
                 <div className="space-y-2">
                   {upcomingWindows.map((w) => (
-                    <div key={w.id} className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <div key={w.id} className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 px-4 py-3">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
                       <div>
                         <p className="text-sm font-semibold text-stone-800">
                           {new Date(w.fromDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
@@ -508,7 +508,7 @@ export default function ResourceDetailPage() {
             <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-4">
               <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  <ShieldCheck className="h-5 w-5 text-green-600" />
                   <h2 className="text-base font-bold text-stone-900">Chain of Custody: Condition Disclosure</h2>
                 </div>
                 {resource.hasPreExistingDamage ? (
@@ -516,7 +516,7 @@ export default function ResourceDetailPage() {
                     <AlertTriangle className="h-3 w-3" /> Disclosed Wear
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
                     <CheckCircle2 className="h-3 w-3" /> Pristine
                   </span>
                 )}
@@ -542,8 +542,8 @@ export default function ResourceDetailPage() {
                   )}
                 </div>
               ) : (
-                <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-xs text-emerald-900">
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                <div className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-xs text-green-900">
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
                   <span>
                     <span className="font-semibold">Declared Pristine.</span> No pre-existing damage — you verify upon handover.
                   </span>
@@ -562,7 +562,7 @@ export default function ResourceDetailPage() {
               <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
                 <div>
                   <p className="text-xs font-medium text-stone-400">{resource.business.name}</p>
-                  <h1 className="mt-0.5 font-display text-xl font-extrabold leading-snug text-stone-900">{resource.name}</h1>
+                  <h1 className="mt-0.5 font-display text-2xl font-semibold leading-snug text-stone-900">{resource.name}</h1>
                   {resource.location && (
                     <div className="mt-1.5 flex items-center gap-1 text-xs text-stone-400">
                       <MapPin className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
@@ -589,8 +589,8 @@ export default function ResourceDetailPage() {
                 </div>
 
                 {/* Escrow note */}
-                <div className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-900">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <div className="flex items-start gap-2 rounded-xl border border-green-100 bg-green-50 p-3 text-xs text-green-900">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
                   <ul className="space-y-0.5 text-[11px] text-stone-600">
                     <li>Rent held in escrow, released only after handover inspection</li>
                     <li><span className="font-semibold">1-hour</span> renter inspection window on receipt</li>
@@ -605,7 +605,7 @@ export default function ResourceDetailPage() {
                   className={cn(
                     "flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold text-white transition-all active:scale-[0.99]",
                     resource.isActive
-                      ? "bg-emerald-600 hover:bg-emerald-700 shadow-[0_4px_16px_rgba(5,150,105,0.25)]"
+                      ? "bg-emerald-600 hover:bg-emerald-700 shadow-[0_4px_16px_rgba(235,131,34,0.25)]"
                       : "bg-stone-300 cursor-not-allowed"
                   )}
                 >

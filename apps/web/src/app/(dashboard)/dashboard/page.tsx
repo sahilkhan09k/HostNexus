@@ -66,7 +66,7 @@ function RatingBadge({
     >
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wider text-stone-400">{label}</p>
-        <div className={cn("flex h-8 w-8 items-center justify-center rounded-xl", color)}>
+        <div className={cn("flex h-8 w-8 items-center justify-center rounded-full", color)}>
           <Award className="h-4 w-4 text-white" />
         </div>
       </div>
@@ -74,7 +74,7 @@ function RatingBadge({
       {rating !== null ? (
         <>
           <div className="flex items-end gap-2">
-            <span className="font-mono text-3xl font-extrabold tracking-tight text-stone-900">
+            <span className="font-display text-4xl font-semibold tracking-tight tabular-nums text-stone-900">
               {rating.toFixed(1)}
             </span>
             <span className="mb-1 text-xs text-stone-400">/ 5.0</span>
@@ -99,7 +99,7 @@ function RatingBadge({
         </>
       ) : (
         <div className="flex flex-col gap-1">
-          <span className="font-mono text-2xl font-extrabold text-stone-300">—</span>
+          <span className="font-display text-3xl font-semibold tabular-nums text-stone-300">—</span>
           <span className="text-xs text-stone-400">No reviews yet</span>
         </div>
       )}
@@ -113,12 +113,12 @@ function ActivityRow({ label, value, icon: Icon, color }: {
   return (
     <div className="flex items-center justify-between py-3">
       <div className="flex items-center gap-3">
-        <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", color)}>
+        <div className={cn("flex h-8 w-8 items-center justify-center rounded-full", color)}>
           <Icon className="h-4 w-4 text-white" />
         </div>
         <span className="text-sm text-stone-600">{label}</span>
       </div>
-      <span className="font-mono text-lg font-bold text-stone-900 tabular-nums">{value}</span>
+      <span className="font-display text-xl font-medium text-stone-900 tabular-nums">{value}</span>
     </div>
   );
 }
@@ -176,9 +176,9 @@ export default function DashboardPage() {
   const statCards = stats
     ? [
         { label: "Listed Resources",  value: String(stats.listedResources),  icon: Package,      iconBg: "bg-emerald-600" },
-        { label: "Incoming Bookings", value: String(stats.incomingBookings), icon: Calendar,     iconBg: "bg-violet-600"  },
-        { label: "Pending Requests",  value: String(stats.pendingRequests),  icon: Clock,        iconBg: "bg-amber-600"   },
-        { label: "My Requests",       value: String(stats.myRequests),       icon: ShoppingBag,  iconBg: "bg-sky-600"     },
+        { label: "Incoming Bookings", value: String(stats.incomingBookings), icon: Calendar,     iconBg: "bg-stone-900"  },
+        { label: "Pending Requests",  value: String(stats.pendingRequests),  icon: Clock,        iconBg: "bg-stone-900"   },
+        { label: "My Requests",       value: String(stats.myRequests),       icon: ShoppingBag,  iconBg: "bg-stone-900"     },
       ]
     : [];
 
@@ -187,13 +187,13 @@ export default function DashboardPage() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-stone-900">Dashboard Overview</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Dashboard Overview</h1>
           <p className="mt-1 text-sm text-stone-500">Welcome back, {greeting} 👋</p>
         </div>
         <button
           type="button"
           onClick={() => router.push("/dashboard/inventory/new")}
-          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(5,150,105,0.25)] transition-all hover:bg-emerald-700 active:scale-[0.98]"
+          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(235,131,34,0.25)] transition-all hover:bg-emerald-700 active:scale-[0.98]"
         >
           List New Resource <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -236,7 +236,7 @@ export default function DashboardPage() {
               label="Rating as Renter"
               rating={reputation?.asRenterRating ?? null}
               count={reputation?.asRenterReviewCount ?? 0}
-              color="bg-sky-600"
+              color="bg-stone-900"
             />
             {/* Activity summary card */}
             <motion.div
@@ -259,13 +259,13 @@ export default function DashboardPage() {
                   label="Resources taken on rent"
                   value={reputation?.resourcesTaken ?? 0}
                   icon={TrendingDown}
-                  color="bg-sky-600"
+                  color="bg-stone-900"
                 />
                 <ActivityRow
                   label="Completed bookings"
                   value={reputation?.completedBookings ?? 0}
                   icon={Award}
-                  color="bg-violet-600"
+                  color="bg-stone-900"
                 />
               </div>
             </motion.div>

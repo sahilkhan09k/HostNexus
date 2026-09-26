@@ -11,12 +11,12 @@ interface SpotlightCardProps {
 
 /**
  * SpotlightCard — light-theme cursor-tracked glow on white cards.
- * Spotlight colour uses a soft emerald tint: rgba(5,150,105,0.06)
+ * Spotlight colour uses a soft emerald tint: rgba(235,131,34,0.06)
  */
 export function SpotlightCard({
   children,
   className,
-  spotlightColor = "rgba(5, 150, 105, 0.06)",
+  spotlightColor = "rgba(235,131,34, 0.06)",
 }: SpotlightCardProps) {
   const divRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });

@@ -34,14 +34,14 @@ export function Navbar() {
             : "bg-transparent"
         )}
       >
-        <nav className="mx-auto flex h-[68px] max-w-screen-xl items-center justify-between px-5 md:px-10 lg:px-16">
+        <nav className="app-container flex h-[68px] items-center justify-between">
           {/* Logo */}
           <a href="/" className="group flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 shadow-sm transition-all duration-200 group-hover:bg-emerald-700">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 transition-all duration-200 group-hover:bg-emerald-600">
               <Building2 className="h-4.5 w-4.5 text-white" strokeWidth={2.2} />
             </div>
-            <span className="font-display text-[17px] font-bold tracking-[-0.02em] text-stone-900">
-              Host<span className="text-emerald-600">Nexus</span>
+            <span className="text-lg font-medium tracking-[-0.04em] text-stone-900">
+              HostNexus
             </span>
           </a>
 
@@ -51,7 +51,7 @@ export function Navbar() {
               <li key={link.label}>
                 <a
                   href={link.href}
-                  className="rounded-lg px-3.5 py-2 text-sm font-medium text-stone-500 transition-all duration-150 hover:bg-stone-100 hover:text-stone-900"
+                  className="rounded-full px-3.5 py-2 text-sm text-stone-500 transition-all duration-150 hover:bg-stone-100 hover:text-stone-900"
                 >
                   {link.label}
                 </a>
@@ -77,8 +77,8 @@ export function Navbar() {
               href="/register"
               className={cn(
                 "rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white",
-                "shadow-[0_2px_8px_rgba(5,150,105,0.25)]",
-                "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(5,150,105,0.35)]",
+                "shadow-[0_2px_8px_rgba(235,131,34,0.25)]",
+                "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(235,131,34,0.35)]",
                 "transition-all duration-200 active:scale-[0.97]"
               )}
             >

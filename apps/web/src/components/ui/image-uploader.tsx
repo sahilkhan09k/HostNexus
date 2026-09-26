@@ -167,7 +167,7 @@ export function ImageUploader({
                 </button>
               </div>
               <div className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-xs text-white text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1">
-                <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                <ShieldCheck className="w-2.5 h-2.5 text-green-400" />
                 <span>#{idx + 1}</span>
               </div>
             </div>

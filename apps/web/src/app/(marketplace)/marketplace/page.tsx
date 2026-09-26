@@ -245,12 +245,12 @@ function MarketplaceContent() {
     (filters.ratingMin > 0 ? 1 : 0);
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-[#FAFAFA]">
       <Navbar />
 
       {/* ── Search / controls header ── */}
       <div className="border-b border-stone-200 bg-white pt-[68px]">
-        <div className="mx-auto max-w-screen-xl px-5 py-5 md:px-10 lg:px-16">
+        <div className="app-container py-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 
             {/* Search box */}
@@ -348,7 +348,7 @@ function MarketplaceContent() {
       </div>
 
       {/* ── Main content ── */}
-      <div className="mx-auto max-w-screen-xl px-5 py-8 md:px-10 lg:px-16">
+      <div className="app-container py-8">
         <div className="flex gap-6">
 
           {/* Desktop sidebar — independent scroll */}
@@ -374,7 +374,7 @@ function MarketplaceContent() {
                   animate={{ x: 0 }}
                   exit={{ x: "-100%" }}
                   transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                  className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAF9] p-4 shadow-xl"
+                  className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAFA] p-4 shadow-xl"
                 >
                   <div className="mb-4 flex items-center justify-between">
                     <span className="text-base font-bold text-stone-900">Filters</span>
@@ -400,7 +400,7 @@ function MarketplaceContent() {
 
             {/* Loading skeletons */}
             {dataLoading && (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="h-72 animate-pulse rounded-2xl bg-stone-100" style={{ animationDelay: `${i * 60}ms` }} />
                 ))}
@@ -431,7 +431,7 @@ function MarketplaceContent() {
             {!dataLoading && filtered.length > 0 && (
               <div className={cn(
                 "grid gap-5",
-                view === "grid" ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" : "grid-cols-1"
+                view === "grid" ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4" : "grid-cols-1"
               )}>
                 {filtered.map((resource, i) => (
                   <ResourceCard
@@ -481,7 +481,7 @@ function MarketplaceContent() {
 export default function MarketplacePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
       </div>
     }>

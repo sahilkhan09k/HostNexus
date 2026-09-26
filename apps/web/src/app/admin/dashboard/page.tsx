@@ -24,7 +24,7 @@ const STATUS_CONFIG: Record<"PENDING" | "VERIFIED" | "REJECTED", {
   border: string;
 }> = {
   PENDING:  { label: "Pending",  icon: Clock,         color: "text-amber-600",   bg: "bg-amber-100",   border: "border-amber-200"  },
-  VERIFIED: { label: "Verified", icon: CheckCircle2,  color: "text-emerald-600", bg: "bg-emerald-100", border: "border-emerald-200" },
+  VERIFIED: { label: "Verified", icon: CheckCircle2,  color: "text-green-600", bg: "bg-green-100", border: "border-green-200" },
   REJECTED: { label: "Rejected", icon: XCircle,       color: "text-rose-600",    bg: "bg-rose-100",    border: "border-rose-200"   },
 };
 
@@ -374,7 +374,7 @@ export default function AdminDashboardPage() {
             className={cn(
               "fixed right-4 top-4 z-[100] flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg",
               toast.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                ? "border-green-200 bg-green-50 text-green-800"
                 : "border-rose-200 bg-rose-50 text-rose-800"
             )}
           >
@@ -397,9 +397,9 @@ export default function AdminDashboardPage() {
 
       {/* Topbar */}
       <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-screen-xl items-center justify-between px-5 md:px-8">
+        <div className="app-container flex h-14 items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900">
               <ShieldCheck className="h-4 w-4 text-white" />
             </div>
             <div>
@@ -432,10 +432,10 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-screen-xl px-5 py-8 md:px-8">
+      <main className="app-container py-8">
         {/* Page title */}
         <div className="mb-6">
-          <h1 className="font-display text-2xl font-bold text-stone-900">
+          <h1 className="font-display text-3xl font-semibold text-stone-900">
             Business Verification Dashboard
           </h1>
           <p className="mt-1 text-sm text-stone-500">
@@ -453,7 +453,7 @@ export default function AdminDashboardPage() {
         ) : summary && (
           <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
             <StatCard label="Pending Review"    value={summary.pending}        icon={Clock}       color="text-amber-600"   bg="bg-amber-100"   />
-            <StatCard label="Verified"          value={summary.verified}       icon={CheckCircle2} color="text-emerald-600" bg="bg-emerald-100" />
+            <StatCard label="Verified"          value={summary.verified}       icon={CheckCircle2} color="text-green-600" bg="bg-green-100" />
             <StatCard label="Rejected"          value={summary.rejected}       icon={XCircle}     color="text-rose-600"    bg="bg-rose-100"    />
             <StatCard label="Total Resources"   value={summary.totalResources} icon={Package}     color="text-sky-600"     bg="bg-sky-100"     />
             <StatCard label="Total Bookings"    value={summary.totalBookings}  icon={CalendarDays} color="text-violet-600"  bg="bg-violet-100"  />

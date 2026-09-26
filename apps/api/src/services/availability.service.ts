@@ -1,5 +1,6 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
+import { CAPACITY_HOLDING_STATUSES, getCommittedQuantity } from "./capacity.js";
 
 export interface CreateWindowInput {
   fromDate: string; // ISO date string
@@ -131,19 +132,27 @@ export class AvailabilityService {
    *
    * A resource is available when ALL of these are true:
    *   1. At least one AvailabilityWindow covers the entire [start, end] span.
-   *   2. No active (non-cancelled, non-completed) booking overlaps that span.
+   *   2. Accepted/active bookings overlapping the span leave >= `quantity` units free.
+   *      Pending requests don't hold stock (same rule as booking create/accept).
    *
    * Returns an object with `available: boolean` and details on why not.
    */
   static async checkAvailability(
     resourceId: string,
     startDate: string,
-    endDate: string
+    endDate: string,
+    quantity = 1
   ) {
     const start = new Date(startDate);
     const end   = new Date(endDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()))
       throw new Error("Invalid date format");
+
+    const resource = await prisma.resource.findUnique({
+      where: { id: resourceId },
+      select: { id: true, quantity: true },
+    });
+    if (!resource) throw new Error("Resource not found");
 
     // 1. Does any window fully cover the request?
     const coveringWindow = await prisma.availabilityWindow.findFirst({
@@ -154,24 +163,37 @@ export class AvailabilityService {
       },
     });
 
-    // 2. Are there conflicting active bookings?
-    const conflicts = await getOverlappingBookings(resourceId, start, end);
+    // 2. How many units do overlapping accepted/active bookings hold?
+    const committed = await getCommittedQuantity(prisma, resourceId, start, end);
+    const availableQuantity = Math.max(0, resource.quantity - committed);
+    const conflicts = await prisma.bookingRequest.findMany({
+      where: {
+        resourceId,
+        bookingStatus: { in: CAPACITY_HOLDING_STATUSES },
+        startDate: { lt: end },
+        endDate:   { gt: start },
+      },
+      select: { id: true, startDate: true, endDate: true, bookingStatus: true, quantity: true },
+    });
 
-    const available = !!coveringWindow && conflicts.length === 0;
+    const available = !!coveringWindow && availableQuantity >= quantity;
 
     return {
       available,
       coveredByWindow: !!coveringWindow,
+      totalQuantity: resource.quantity,
+      availableQuantity,
       conflicts: conflicts.map((b) => ({
         bookingId: b.id,
         startDate: b.startDate,
         endDate:   b.endDate,
         status:    b.bookingStatus,
+        quantity:  b.quantity,
       })),
       message: !coveringWindow
         ? "Resource is not available during this period (no availability window set)"
-        : conflicts.length > 0
-        ? `Resource already has ${conflicts.length} active booking(s) overlapping this period`
+        : availableQuantity < quantity
+        ? `Only ${availableQuantity} of ${resource.quantity} unit(s) free for this period`
         : "Resource is available",
     };
   }

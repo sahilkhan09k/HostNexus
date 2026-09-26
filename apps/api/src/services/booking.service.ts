@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { RazorpayService } from "./razorpay.service.js";
+import { assertCapacity, lockResource } from "./capacity.js";
 import type {
   CreateBookingRequestInput,
   UpdateBookingStatusInput,
@@ -225,25 +226,6 @@ export class BookingService {
       );
     }
 
-    // FIX #17b: Booking conflict check (no overlapping accepted/active bookings)
-    const conflicting = await prisma.bookingRequest.findFirst({
-      where: {
-        resourceId: input.resourceId,
-        bookingStatus: {
-          in: ["BOOKING_ACCEPTED", "HANDOVER_INSPECTION", "ACTIVE", "RETURN_INITIATED", "OWNER_INSPECTION"],
-        },
-        AND: [
-          { startDate: { lt: endDate } },
-          { endDate:   { gt: startDate } },
-        ],
-      },
-    });
-    if (conflicting) {
-      throw new Error(
-        "This resource already has an accepted booking that overlaps with your requested dates."
-      );
-    }
-
     // Financial calculation in paise
     const rentAmountPaise      = resource.rentAmountPaise * totalDays;
     const securityDepositPaise = resource.securityDepositPaise;
@@ -263,33 +245,40 @@ export class BookingService {
       damagePhotos:         resource.damagePhotos || [],
     };
 
-    const bookingRequest = await prisma.bookingRequest.create({
-      data: {
-        seekerId:   seekerBusiness.id,
-        providerId: resource.businessId,
-        resourceId: input.resourceId,
-        quantity:   input.quantity,
-        startDate,
-        endDate,
-        totalDays,
-        specialRequests: input.specialRequests || null,
-        bookingStatus:   "BOOKING_REQUESTED",
-        financialStatus: "PENDING_PAYMENT",
-        status:          "pending",
-        rentAmountPaise,
-        securityDepositPaise,
-        totalAmountPaise,
-        proposedPrice: input.proposedPrice ?? (totalAmountPaise / 100),
-        conditionSnapshot:        conditionSnapshot as any,
-        listingPhotosSnapshot,
-        damageDisclosureSnapshot: damageDisclosureSnapshot as any,
-        termsVersion: "v2.0",
-      },
-      include: {
-        resource: true,
-        seeker:   true,
-        provider: true,
-      },
+    // FIX #17b: Quantity-aware conflict check, atomic with the insert.
+    // The resource row lock serialises concurrent creates/accepts for this resource.
+    const bookingRequest = await prisma.$transaction(async (tx) => {
+      await lockResource(tx, resource.id);
+      await assertCapacity(tx, resource, input.quantity, startDate, endDate);
+
+      return tx.bookingRequest.create({
+        data: {
+          seekerId:   seekerBusiness.id,
+          providerId: resource.businessId,
+          resourceId: input.resourceId,
+          quantity:   input.quantity,
+          startDate,
+          endDate,
+          totalDays,
+          specialRequests: input.specialRequests || null,
+          bookingStatus:   "BOOKING_REQUESTED",
+          financialStatus: "PENDING_PAYMENT",
+          status:          "pending",
+          rentAmountPaise,
+          securityDepositPaise,
+          totalAmountPaise,
+          proposedPrice: input.proposedPrice ?? (totalAmountPaise / 100),
+          conditionSnapshot:        conditionSnapshot as any,
+          listingPhotosSnapshot,
+          damageDisclosureSnapshot: damageDisclosureSnapshot as any,
+          termsVersion: "v2.0",
+        },
+        include: {
+          resource: true,
+          seeker:   true,
+          provider: true,
+        },
+      });
     });
 
     await this.recordTimelineEvent(
@@ -421,9 +410,25 @@ export class BookingService {
         throw new Error("Booking can only be accepted when in BOOKING_REQUESTED status");
       }
 
-      const updated = await prisma.bookingRequest.update({
-        where: { id: bookingId },
-        data: { status: "accepted", bookingStatus: "BOOKING_ACCEPTED" },
+      // Re-check capacity at accept time: several pending requests may overlap,
+      // and only the ones that still fit may be accepted.
+      const updated = await prisma.$transaction(async (tx) => {
+        await lockResource(tx, booking.resourceId);
+        const resource = await tx.resource.findUnique({ where: { id: booking.resourceId } });
+        if (!resource) throw new Error("Resource not found");
+
+        // Re-read status under the lock so a double-click can't accept twice
+        const current = await tx.bookingRequest.findUnique({ where: { id: bookingId } });
+        if (current?.bookingStatus !== "BOOKING_REQUESTED") {
+          throw new Error("Booking can only be accepted when in BOOKING_REQUESTED status");
+        }
+
+        await assertCapacity(tx, resource, booking.quantity, booking.startDate, booking.endDate, bookingId);
+
+        return tx.bookingRequest.update({
+          where: { id: bookingId },
+          data: { status: "accepted", bookingStatus: "BOOKING_ACCEPTED" },
+        });
       });
 
       await this.recordTimelineEvent(

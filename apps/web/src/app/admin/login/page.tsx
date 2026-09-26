@@ -62,10 +62,10 @@ export default function AdminLoginPage() {
         <div className="p-8">
           {/* Logo / heading */}
           <div className="mb-8 text-center">
-            <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 shadow-[0_8px_24px_rgba(5,150,105,0.40)]">
+            <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 shadow-[0_8px_24px_rgba(235,131,34,0.40)]">
               <ShieldCheck className="h-7 w-7 text-white" />
             </div>
-            <h1 className="font-display text-2xl font-bold text-stone-900">Admin Portal</h1>
+            <h1 className="font-display text-3xl font-semibold text-stone-900">Admin Portal</h1>
             <p className="mt-1 text-sm text-stone-500">HostNexus · Internal Access Only</p>
           </div>
 
@@ -115,7 +115,7 @@ export default function AdminLoginPage() {
               type="submit" disabled={loading}
               className={cn(
                 "mt-2 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white",
-                "bg-emerald-600 shadow-[0_2px_8px_rgba(5,150,105,0.30)]",
+                "bg-emerald-600 shadow-[0_2px_8px_rgba(235,131,34,0.30)]",
                 "hover:bg-emerald-700 transition-all active:scale-[0.98]",
                 "disabled:opacity-60 disabled:cursor-not-allowed"
               )}

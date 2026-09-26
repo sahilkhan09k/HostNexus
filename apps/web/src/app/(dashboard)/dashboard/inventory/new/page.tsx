@@ -100,7 +100,7 @@ export default function NewResourcePage() {
 
   return (
     <div className="space-y-6">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-5xl mx-auto">
 
         {/* ── Task 5.1 — Breadcrumb ────────────────────────────────────────── */}
         <nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-1.5">
@@ -116,7 +116,7 @@ export default function NewResourcePage() {
 
         {/* ── Task 5.1 — Page header ────────────────────────────────────────── */}
         <div className="mb-8">
-          <h1 className="font-display text-2xl font-bold text-stone-900">
+          <h1 className="font-display text-3xl font-semibold text-stone-900">
             List New Resource
           </h1>
           <p className="mt-1 text-sm text-stone-500">
@@ -135,13 +135,13 @@ export default function NewResourcePage() {
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               role="status"
               aria-live="polite"
-              className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3 mb-6"
+              className="rounded-xl border border-green-200 bg-green-50 p-4 flex items-center gap-3 mb-6"
             >
               <CheckCircle2
-                className="h-4 w-4 text-emerald-600 shrink-0"
+                className="h-4 w-4 text-green-600 shrink-0"
                 aria-hidden="true"
               />
-              <p className="text-sm font-medium text-emerald-800">
+              <p className="text-sm font-medium text-green-800">
                 Resource created! Redirecting to inventory...
               </p>
             </motion.div>

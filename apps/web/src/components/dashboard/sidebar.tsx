@@ -100,23 +100,23 @@ export function DashboardSidebar() {
       <div className={cn("flex items-center border-b border-stone-100 px-4 py-4", collapsed ? "justify-center" : "justify-between")}>
         {!collapsed && (
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900">
               <Building2 className="h-3.5 w-3.5 text-white" strokeWidth={2.2} />
             </div>
-            <span className="font-display text-base font-bold tracking-tight text-stone-900">
-              Host<span className="text-emerald-600">Nexus</span>
+            <span className="text-lg font-medium tracking-[-0.04em] text-stone-900">
+              HostNexus
             </span>
           </Link>
         )}
         {collapsed && (
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900">
             <Building2 className="h-3.5 w-3.5 text-white" strokeWidth={2.2} />
           </div>
         )}
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="hidden rounded-lg p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 lg:flex"
+          className="hidden rounded-full p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 lg:flex"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
@@ -139,20 +139,20 @@ export function DashboardSidebar() {
                 <Link
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                    "flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm transition-all duration-150",
                     active
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "text-stone-500 hover:bg-stone-50 hover:text-stone-800",
+                      ? "bg-stone-900 font-medium text-white"
+                      : "text-stone-500 hover:bg-stone-100 hover:text-stone-900",
                     collapsed && "justify-center px-2"
                   )}
                   title={collapsed ? item.label : undefined}
                 >
-                  <Icon className={cn("h-4 w-4 shrink-0", active ? "text-emerald-600" : "")} />
+                  <Icon className={cn("h-4 w-4 shrink-0", active ? "text-emerald-400" : "")} />
                   {!collapsed && (
                     <>
                       <span className="flex-1">{item.label}</span>
                       {badge !== null && (
-                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                        <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                           {badge}
                         </span>
                       )}
@@ -168,7 +168,7 @@ export function DashboardSidebar() {
       {/* User section */}
       <div className="border-t border-stone-100 p-3">
         <div className={cn("flex items-center gap-3 rounded-xl p-2", collapsed && "justify-center")}>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-900 text-sm font-medium text-white">
             {avatarInitial}
           </div>
           {!collapsed && (

@@ -97,7 +97,7 @@ export function ResourceCard({ data, index = 0, onBook, onViewDetails }: Resourc
         <span className={cn(
           "absolute right-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-xs shadow-xs",
           data.available
-            ? "bg-emerald-100/90 text-emerald-800"
+            ? "bg-green-100/90 text-green-800"
             : "bg-stone-100/90 text-stone-600"
         )}>
           {data.availableText}

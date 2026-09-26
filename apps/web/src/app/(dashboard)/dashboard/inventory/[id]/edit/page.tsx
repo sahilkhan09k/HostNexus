@@ -179,7 +179,7 @@ export default function EditResourcePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-12">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-stone-500">
         <Link href="/dashboard/inventory" className="hover:text-stone-800 transition-colors">
           My Listings
@@ -189,7 +189,7 @@ export default function EditResourcePage() {
       </nav>
 
       <div>
-        <h1 className="text-2xl font-bold text-stone-900">Edit Resource Listing</h1>
+        <h1 className="font-display text-3xl font-semibold text-stone-900">Edit Resource Listing</h1>
         <p className="text-xs text-stone-500 mt-1">Update commercial pricing, condition disclosures, and specifications.</p>
       </div>
 
@@ -199,9 +199,9 @@ export default function EditResourcePage() {
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3 text-sm text-emerald-800 font-medium"
+            className="rounded-xl border border-green-200 bg-green-50 p-4 flex items-center gap-3 text-sm text-green-800 font-medium"
           >
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
             Resource successfully updated! Redirecting to inventory...
           </motion.div>
         )}

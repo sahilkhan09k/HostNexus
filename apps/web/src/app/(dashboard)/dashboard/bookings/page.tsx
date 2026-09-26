@@ -450,7 +450,7 @@ export default function BookingsPage() {
       case "HANDOVER_INSPECTION":
         return <span className="rounded-full bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-0.5 text-xs font-semibold animate-pulse">1-Hr Receiving Inspection</span>;
       case "ACTIVE":
-        return <span className="rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold">Active Rental</span>;
+        return <span className="rounded-full bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 text-xs font-semibold">Active Rental</span>;
       case "RETURN_INITIATED":
         return <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold">Return Initiated</span>;
       case "RETURN_NOT_RECEIVED":
@@ -462,7 +462,7 @@ export default function BookingsPage() {
       case "NON_RETURNED":
         return <span className="rounded-full bg-stone-900 text-white px-2.5 py-0.5 text-xs font-semibold">Non-Returned / Default</span>;
       case "COMPLETED":
-        return <span className="rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold">Completed & Settled</span>;
+        return <span className="rounded-full bg-green-100 text-green-800 border border-green-200 px-2.5 py-0.5 text-xs font-semibold">Completed & Settled</span>;
       case "CANCELLED":
         return <span className="rounded-full bg-stone-100 text-stone-600 border border-stone-200 px-2.5 py-0.5 text-xs font-semibold">Cancelled</span>;
       default:
@@ -481,7 +481,7 @@ export default function BookingsPage() {
       case "DEPOSIT_HELD":
         return <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">Deposit Protected in Escrow</span>;
       case "DEPOSIT_REFUNDED":
-        return <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">Deposit 100% Refunded</span>;
+        return <span className="text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-200">Deposit 100% Refunded</span>;
       case "DEPOSIT_TO_OWNER":
         return <span className="text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">Deposit Settled to Owner</span>;
       case "PARTIAL_SETTLEMENT":
@@ -500,7 +500,7 @@ export default function BookingsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900">Rental Bookings & Chain of Custody</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Rental Bookings & Chain of Custody</h1>
           <p className="text-xs text-stone-500 mt-1">
             Manage commercial rentals, inspection windows, evidence trails, and escrow releases.
           </p>
@@ -977,7 +977,7 @@ export default function BookingsPage() {
                               Disclosed Wear: {String(selectedBooking.damageDisclosureSnapshot.damageDescription || "")}
                             </span>
                           ) : (
-                            <span className="text-emerald-700 font-medium flex items-center gap-1">
+                            <span className="text-green-700 font-medium flex items-center gap-1">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Declared Pristine
                             </span>
                           )}
@@ -1043,7 +1043,7 @@ export default function BookingsPage() {
                               Claim: ₹{((selectedBooking.damageClaims[0].claimedAmountPaise || 0) / 100).toLocaleString()} ({selectedBooking.damageClaims[0].claimType})
                             </span>
                           ) : (
-                            <span className="text-emerald-700">No damage claimed</span>
+                            <span className="text-green-700">No damage claimed</span>
                           )}
                         </div>
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
@@ -1145,7 +1145,7 @@ export default function BookingsPage() {
                                     "text-[10px] font-semibold px-2 py-0.5 rounded uppercase",
                                     offer.status === "PENDING" && "bg-amber-100 text-amber-800",
                                     offer.status === "COUNTERED" && "bg-stone-100 text-stone-600",
-                                    offer.status === "ACCEPTED" && "bg-emerald-100 text-emerald-800",
+                                    offer.status === "ACCEPTED" && "bg-green-100 text-green-800",
                                     offer.status === "REJECTED" && "bg-rose-100 text-rose-800"
                                   )}>
                                     {offer.status.replace("_", " ")}
