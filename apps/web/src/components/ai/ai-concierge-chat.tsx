@@ -22,8 +22,13 @@ export interface ChatMessage {
   sources?: string[];
   suggestedFollowUps?: string[];
   intent?: string;
+  /** Welcome, reset and error notices are UI-only and not sent as conversation history */
+  excludeFromHistory?: boolean;
   timestamp: Date;
 }
+
+// Recent turns sent with each question so the concierge can answer follow-ups
+const HISTORY_TURNS = 10;
 
 const DEFAULT_SUGGESTIONS = [
   {
@@ -278,6 +283,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         `* **Explain Rules & Damage Protocol**: *e.g., "What will happen if my product gets damage?"*\n` +
         `* **Financial Security**: *e.g., "How does escrow payment and deposit refund work?"*\n` +
         `* **B2B Bulk Negotiation**: *e.g., "Can I negotiate price with equipment owners?"*`,
+      excludeFromHistory: true,
       timestamp: new Date(),
     },
   ]);
@@ -305,11 +311,15 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
     setIsLoading(true);
 
     try {
-      // Build conversation history for context
-      const history = messages.slice(-6).map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      // Build conversation history for context (this chat session only; reset clears it)
+      const history = messages
+        .filter((m) => !m.excludeFromHistory)
+        .slice(-HISTORY_TURNS)
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          listingIds: m.results?.map((r) => r.id),
+        }));
 
       // Call the real Express RAG backend
       const response = await queryAiConcierge({
@@ -338,6 +348,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
           `### ⚠️ Connection Notice\n` +
           `I couldn't reach the backend AI pipeline at this moment (${err?.message || "Network Error"}).\n` +
           `Please verify that the API server is running on \`http://localhost:5000\`.`,
+        excludeFromHistory: true,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -354,6 +365,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         content:
           `### 🔄 Chat Reset\n` +
           `Ask me anything about marketplace listings, multi-item orders (chairs, tables, halls), damage policies, or escrow protections.`,
+        excludeFromHistory: true,
         timestamp: new Date(),
       },
     ]);

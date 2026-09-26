@@ -381,7 +381,7 @@ export async function rejectNegotiation(bookingId: string, reason?: string): Pro
 
 export interface AiConciergeQueryInput {
   message: string;
-  history?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  history?: Array<{ role: "user" | "assistant" | "system"; content: string; listingIds?: string[] }>;
   date?: string;
   location?: string;
   quantity?: number;

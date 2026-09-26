@@ -4,12 +4,13 @@ import { RagService } from "../services/rag/rag.service.js";
 
 const chatHistoryMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
+  content: z.string().max(20000),
+  listingIds: z.array(z.string()).max(20).optional(),
 });
 
 const conciergeQuerySchema = z.object({
   message: z.string().min(1, "Message cannot be empty").max(2000, "Message too long"),
-  history: z.array(chatHistoryMessageSchema).optional(),
+  history: z.array(chatHistoryMessageSchema).max(50).optional(),
   date: z.string().optional(),
   location: z.string().optional(),
   quantity: z.number().int().positive().optional(),

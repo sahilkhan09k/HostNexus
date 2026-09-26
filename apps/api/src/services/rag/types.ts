@@ -1,6 +1,8 @@
 export interface ChatHistoryMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  /** IDs of the listing cards shown with an assistant turn, in display order */
+  listingIds?: string[];
 }
 
 export interface RagQueryInput {
