@@ -500,7 +500,7 @@ export default function BookingsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-normal text-stone-900">Rental Bookings & Chain of Custody</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Rental Bookings & Chain of Custody</h1>
           <p className="text-xs text-stone-500 mt-1">
             Manage commercial rentals, inspection windows, evidence trails, and escrow releases.
           </p>

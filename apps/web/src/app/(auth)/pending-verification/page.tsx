@@ -70,7 +70,7 @@ export default function PendingVerificationPage() {
             transition={{ duration: 0.35, delay: 0.2, ease: EASE }}
             className="text-center"
           >
-            <h1 className="font-display text-3xl font-normal text-stone-900">
+            <h1 className="font-display text-3xl font-semibold text-stone-900">
               Application Under Review
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-stone-500">

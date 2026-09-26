@@ -189,7 +189,7 @@ export default function EditResourcePage() {
       </nav>
 
       <div>
-        <h1 className="font-display text-3xl font-normal text-stone-900">Edit Resource Listing</h1>
+        <h1 className="font-display text-3xl font-semibold text-stone-900">Edit Resource Listing</h1>
         <p className="text-xs text-stone-500 mt-1">Update commercial pricing, condition disclosures, and specifications.</p>
       </div>
 

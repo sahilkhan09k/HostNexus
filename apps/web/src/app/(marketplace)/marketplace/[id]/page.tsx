@@ -562,7 +562,7 @@ export default function ResourceDetailPage() {
               <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
                 <div>
                   <p className="text-xs font-medium text-stone-400">{resource.business.name}</p>
-                  <h1 className="mt-0.5 font-display text-2xl font-normal leading-snug text-stone-900">{resource.name}</h1>
+                  <h1 className="mt-0.5 font-display text-2xl font-semibold leading-snug text-stone-900">{resource.name}</h1>
                   {resource.location && (
                     <div className="mt-1.5 flex items-center gap-1 text-xs text-stone-400">
                       <MapPin className="h-3.5 w-3.5 text-emerald-500 shrink-0" />

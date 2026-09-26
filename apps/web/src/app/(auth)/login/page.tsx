@@ -73,7 +73,7 @@ export default function LoginPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
             <span className="text-xl font-black text-white">H</span>
           </div>
-          <h2 className="mt-8 font-display text-4xl font-normal leading-[1.1] text-white">
+          <h2 className="mt-8 font-display text-4xl font-semibold leading-[1.1] text-white">
             Welcome back to HostNexus
           </h2>
           <p className="mt-3 text-base leading-relaxed text-white/65">
@@ -103,7 +103,7 @@ export default function LoginPage() {
         className="flex flex-col justify-center p-8 md:p-10"
       >
         <div className="mb-8">
-          <h1 className="font-display text-3xl font-normal text-stone-900">Sign in to your account</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Sign in to your account</h1>
           <p className="mt-1.5 text-sm text-stone-500">
             Don&apos;t have an account?{" "}
             <Link href="/register" className="font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">

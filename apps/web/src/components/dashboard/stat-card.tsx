@@ -25,7 +25,7 @@ export function StatCard({ label, value, change, changeType, icon: Icon, iconBg,
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="text-xs font-medium uppercase tracking-wider text-stone-400">{label}</p>
-          <p className="mt-2 font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{value}</p>
+          <p className="mt-2 font-display text-4xl font-semibold tracking-tight tabular-nums text-stone-900">{value}</p>
           {change && (
             <div className="mt-2 flex items-center gap-1.5">
               <span

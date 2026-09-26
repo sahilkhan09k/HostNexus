@@ -164,7 +164,7 @@ export default function DashboardMarketplacePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-3xl font-normal text-stone-900">Browse Resources</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Browse Resources</h1>
           <p className="mt-1 text-sm text-stone-500">Discover resources from verified businesses across India</p>
         </div>
         <span className="rounded-xl bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-600 tabular-nums">

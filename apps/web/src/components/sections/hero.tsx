@@ -30,7 +30,7 @@ export function HeroSection() {
         aria-hidden="true"
         style={{ transform: `translateY(${y * 0.45}px)`, opacity: Math.max(0, 1 - y / 500) }}
       >
-        HostNexus
+        <span>HostNexus</span>
       </div>
 
       <Container reveal={false} className="hn-hero__inner">

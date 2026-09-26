@@ -627,7 +627,7 @@ export default function DashboardResourceDetailPage() {
           <div className="rounded-2xl border border-stone-200 bg-white p-5 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="font-display text-3xl font-normal text-stone-900">{resource.name}</h1>
+                <h1 className="font-display text-3xl font-semibold text-stone-900">{resource.name}</h1>
                 <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-stone-500">
                   <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{resource.business.name}</span>
                   {resource.location && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-emerald-500" />{resource.location}</span>}

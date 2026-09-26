@@ -74,7 +74,7 @@ function RatingBadge({
       {rating !== null ? (
         <>
           <div className="flex items-end gap-2">
-            <span className="font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">
+            <span className="font-display text-4xl font-semibold tracking-tight tabular-nums text-stone-900">
               {rating.toFixed(1)}
             </span>
             <span className="mb-1 text-xs text-stone-400">/ 5.0</span>
@@ -99,7 +99,7 @@ function RatingBadge({
         </>
       ) : (
         <div className="flex flex-col gap-1">
-          <span className="font-display text-3xl font-normal tabular-nums text-stone-300">—</span>
+          <span className="font-display text-3xl font-semibold tabular-nums text-stone-300">—</span>
           <span className="text-xs text-stone-400">No reviews yet</span>
         </div>
       )}
@@ -187,7 +187,7 @@ export default function DashboardPage() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-3xl font-normal text-stone-900">Dashboard Overview</h1>
+          <h1 className="font-display text-3xl font-semibold text-stone-900">Dashboard Overview</h1>
           <p className="mt-1 text-sm text-stone-500">Welcome back, {greeting} 👋</p>
         </div>
         <button

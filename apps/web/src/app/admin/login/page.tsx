@@ -65,7 +65,7 @@ export default function AdminLoginPage() {
             <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 shadow-[0_8px_24px_rgba(235,131,34,0.40)]">
               <ShieldCheck className="h-7 w-7 text-white" />
             </div>
-            <h1 className="font-display text-3xl font-normal text-stone-900">Admin Portal</h1>
+            <h1 className="font-display text-3xl font-semibold text-stone-900">Admin Portal</h1>
             <p className="mt-1 text-sm text-stone-500">HostNexus · Internal Access Only</p>
           </div>
 

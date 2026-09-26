@@ -91,7 +91,7 @@ function RatingCard({ label, rating, count, accent, index }: {
       {rating !== null ? (
         <>
           <div className="flex items-end gap-2">
-            <span className="font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{rating.toFixed(1)}</span>
+            <span className="font-display text-4xl font-semibold tracking-tight tabular-nums text-stone-900">{rating.toFixed(1)}</span>
             <span className="mb-1 text-xs text-stone-400">/ 5</span>
           </div>
           <StarRow rating={rating} />
@@ -99,7 +99,7 @@ function RatingCard({ label, rating, count, accent, index }: {
         </>
       ) : (
         <div className="flex flex-col gap-1 pt-2">
-          <span className="font-display text-3xl font-normal tabular-nums text-stone-300">—</span>
+          <span className="font-display text-3xl font-semibold tabular-nums text-stone-300">—</span>
           <span className="text-xs text-stone-400">No reviews yet</span>
         </div>
       )}
@@ -278,7 +278,7 @@ export default function BusinessProfilePage() {
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="font-display text-3xl font-normal text-stone-900">
+                <h1 className="font-display text-3xl font-semibold text-stone-900">
                   {business.name}
                 </h1>
                 {business.owner.verificationStatus === "VERIFIED" && (
@@ -324,13 +324,13 @@ export default function BusinessProfilePage() {
             {/* Quick stats */}
             <div className="flex shrink-0 gap-4 sm:flex-col sm:items-end">
               <div className="text-center sm:text-right">
-                <p className="font-display text-3xl font-normal tabular-nums text-stone-900 tabular-nums">
+                <p className="font-display text-3xl font-semibold tabular-nums text-stone-900 tabular-nums">
                   {reputation.resourcesGiven}
                 </p>
                 <p className="text-xs text-stone-400">Resources rented out</p>
               </div>
               <div className="text-center sm:text-right">
-                <p className="font-display text-3xl font-normal tabular-nums text-stone-900 tabular-nums">
+                <p className="font-display text-3xl font-semibold tabular-nums text-stone-900 tabular-nums">
                   {reputation.resourcesTaken}
                 </p>
                 <p className="text-xs text-stone-400">Resources taken on rent</p>

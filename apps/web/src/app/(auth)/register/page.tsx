@@ -293,7 +293,7 @@ export default function RegisterPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
             <span className="text-lg font-medium text-white">H</span>
           </div>
-          <h2 className="mt-8 font-display text-4xl font-normal leading-[1.1] text-white">
+          <h2 className="mt-8 font-display text-4xl font-semibold leading-[1.1] text-white">
             Join India&apos;s Hospitality Network
           </h2>
           <p className="mt-3 text-base leading-relaxed text-stone-400">
@@ -345,7 +345,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="mb-5">
-          <h1 className="font-display text-3xl font-normal text-stone-900">
+          <h1 className="font-display text-3xl font-semibold text-stone-900">
             {step === 1 && "Create your account"}
             {step === 2 && "Business details"}
             {step === 3 && "Document verification"}

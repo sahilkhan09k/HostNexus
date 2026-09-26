@@ -201,7 +201,7 @@ export default function InventoryPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-3xl font-normal text-stone-900">
+          <h1 className="font-display text-3xl font-semibold text-stone-900">
             Resource Inventory
           </h1>
           <p className="mt-1 text-sm text-stone-500">

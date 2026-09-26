@@ -124,7 +124,7 @@ function SummaryCard({ label, value, icon: Icon, iconBg }: SummaryCardProps) {
       <div className={cn("mb-3 flex h-9 w-9 items-center justify-center rounded-full", iconBg)}>
         <Icon className="h-[18px] w-[18px] text-white" />
       </div>
-      <p className="font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{value}</p>
+      <p className="font-display text-4xl font-semibold tracking-tight tabular-nums text-stone-900">{value}</p>
       <p className="mt-1 text-sm text-stone-500">{label}</p>
     </div>
   );
@@ -243,7 +243,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="font-display text-3xl font-normal text-stone-900">Analytics</h1>
+        <h1 className="font-display text-3xl font-semibold text-stone-900">Analytics</h1>
         <p className="mt-1 text-sm text-stone-500">Your resource and booking performance</p>
       </div>
 
