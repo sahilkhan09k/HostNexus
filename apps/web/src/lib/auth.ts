@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // HostNexus AuthService
 // Handles access token (15m) + refresh token (7d) lifecycle
-// Registration is now a 3-step KYC flow — no tokens on register,
-// account must be VERIFIED by admin before login is allowed.
+// Registration is a 3-step flow — the API reads and verifies the GSTIN
+// from the GST certificate, so the account is VERIFIED on creation.
 // ─────────────────────────────────────────────────────────────
 
 export interface SafeUser {
@@ -37,10 +37,10 @@ export interface AuthResponse {
   };
 }
 
-/** What the register endpoint returns — 202, no tokens */
+/** What the register endpoint returns — 201 once the GSTIN is verified, no tokens (sign in next) */
 export interface RegisterResponse {
   success: boolean;
-  data: { user: SafeUser };
+  data: { user: SafeUser; gstin: { gstin: string; legalName: string | null; tradeName: string | null; status: string | null } };
   message: string;
 }
 
@@ -56,7 +56,6 @@ export interface RegisterCredentials {
   state: string;
   pincode: string;
   gstCertificateUrl: string;
-  aadhaarUrl: string;
 }
 
 interface LoginCredentials {
@@ -262,8 +261,8 @@ export class AuthService {
   }
 
   /**
-   * Register — sends the full KYC payload, returns 202 (no tokens).
-   * Caller is responsible for redirecting to /pending-verification.
+   * Register — sends the GST certificate; the API verifies the GSTIN and returns 201 (no tokens).
+   * Caller signs in afterwards.
    */
   static async register(credentials: RegisterCredentials): Promise<RegisterResponse> {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
@@ -281,7 +280,7 @@ export class AuthService {
       );
     }
 
-    // 202 — pending verification, no tokens issued
+    // 201 — GSTIN verified, account active; no tokens issued
     return response.json() as Promise<RegisterResponse>;
   }
 

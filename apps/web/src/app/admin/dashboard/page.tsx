@@ -198,8 +198,12 @@ function UserRow({
                     <DocLink url={user.gstCertificateUrl} label="View GST Doc" />
                   </div>
                   <div>
-                    <p className="mb-1 text-xs font-medium text-stone-600">Aadhaar / Udyam</p>
-                    <DocLink url={user.aadhaarUrl} label="View Aadhaar" />
+                    <p className="mb-1 text-xs font-medium text-stone-600">GSTIN</p>
+                    {user.gstin ? (
+                      <p className="font-mono text-xs text-stone-800">{user.gstin}</p>
+                    ) : (
+                      <DocLink url={user.aadhaarUrl} label="View Aadhaar" />
+                    )}
                   </div>
                 </div>
 

@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
+import { GstinService, type GstinDetails } from "./gstin.service.js";
 import type { RegisterInput, LoginInput } from "../schemas/auth.schema.js";
 
 const SALT_ROUNDS = 10;
@@ -14,6 +15,7 @@ interface SafeUser {
   ownerName: string | null;
   phone: string | null;
   verificationStatus: string;
+  gstin?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +40,7 @@ export class AuthService {
     phone: string | null;
     passwordHash: string;
     verificationStatus: string;
+    gstin?: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): SafeUser {
@@ -93,14 +96,25 @@ export class AuthService {
   }
 
   /**
-   * Register: create user (PENDING) + business in one transaction.
-   * Does NOT issue tokens — user must wait for admin verification.
+   * Register with automated KYC: extract the GSTIN from the uploaded GST
+   * certificate, verify it is registered and Active, then create the user
+   * (VERIFIED) + business in one transaction. No admin review needed.
    */
-  static async register(input: RegisterInput): Promise<{ user: SafeUser }> {
+  static async register(input: RegisterInput): Promise<{ user: SafeUser; gstin: GstinDetails }> {
     const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
     if (existingUser) {
       throw new Error("An account with this email already exists");
     }
+
+    const gstin = await GstinService.extractFromDocument(input.gstCertificateUrl);
+    const gstinTaken = await prisma.user.findUnique({ where: { gstin } });
+    if (gstinTaken) {
+      const err = new Error(`GSTIN ${gstin} is already registered on HostNexus. Please sign in instead.`);
+      (err as any).code = "GSTIN_ALREADY_REGISTERED";
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const details = await GstinService.verify(gstin);
 
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
@@ -111,9 +125,10 @@ export class AuthService {
           passwordHash,
           ownerName: input.ownerName,
           phone: input.phone,
-          verificationStatus: "PENDING",
+          verificationStatus: "VERIFIED",
+          verificationNotes: `Auto-verified via GSTIN ${gstin}${details.legalName ? ` (${details.legalName})` : ""}`,
           gstCertificateUrl: input.gstCertificateUrl,
-          aadhaarUrl: input.aadhaarUrl,
+          gstin,
         },
       });
 
@@ -132,7 +147,7 @@ export class AuthService {
       return newUser;
     });
 
-    return { user: this.sanitizeUser(user) };
+    return { user: this.sanitizeUser(user), gstin: details };
   }
 
   /**

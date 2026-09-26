@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 export const registerSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -14,9 +14,8 @@ export const registerSchema = z.object({
   city: z.string().min(2, "City is required"),
   state: z.string().min(2, "State is required"),
   pincode: z.string().regex(/^\d{6}$/, "Enter a valid 6-digit pincode"),
-  // KYC documents (file URLs after upload)
+  // KYC: GST certificate (file URL after upload) — GSTIN is extracted and verified server-side
   gstCertificateUrl: z.string().min(1, "GST Certificate is required"),
-  aadhaarUrl: z.string().min(1, "Aadhaar document is required"),
 });
 
 export const loginSchema = z.object({

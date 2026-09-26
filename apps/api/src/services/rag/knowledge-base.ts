@@ -159,8 +159,9 @@ HostNexus accommodates real-world B2B volume discounting through in-app negotiat
 
 HostNexus is strictly an invite-and-verified B2B community for hotels, banquet venues, caterers, and event planners:
 - All users must register a commercial entity.
-- GST Certificate and Aadhaar / Udyam Certificate must be uploaded during onboarding.
-- HostNexus admin validates the business registration against GST portal records before approving the account.
+- Only the GST registration certificate is uploaded during onboarding.
+- HostNexus reads the GSTIN from the certificate and checks it against GST registry records instantly; businesses with an active GSTIN are verified automatically and can sign in right away.
+- An unregistered, cancelled or unreadable GSTIN blocks sign-up until a correct certificate is uploaded.
 - Unverified users cannot list commercial inventory or receive escrow payouts.
 `
   },

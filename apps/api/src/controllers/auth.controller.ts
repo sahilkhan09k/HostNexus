@@ -8,11 +8,11 @@ export class AuthController {
     try {
       const input = registerSchema.parse(req.body);
       const result = await AuthService.register(input);
-      // 202 Accepted — account created but awaiting verification
-      res.status(202).json({
+      // 201 — GSTIN verified automatically; the account can sign in right away
+      res.status(201).json({
         success: true,
         data: result,
-        message: "Account created. Awaiting admin verification.",
+        message: "GSTIN verified. Account created.",
       });
     } catch (error) {
       next(error);

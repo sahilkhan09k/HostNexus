@@ -50,6 +50,7 @@ export class AdminService {
         verificationNotes: true,
         gstCertificateUrl: true,
         aadhaarUrl: true,
+        gstin: true,
         createdAt: true,
         businesses: {
           select: {

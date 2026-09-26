@@ -38,7 +38,7 @@ const FIELD_LABELS: Record<string, string> = {
   email: "Email", password: "Password", ownerName: "Full name", phone: "Phone",
   businessName: "Business name", businessType: "Business type", addressLine: "Address",
   city: "City", state: "State", pincode: "Pincode",
-  gstCertificateUrl: "GST Certificate", aadhaarUrl: "Aadhaar",
+  gstCertificateUrl: "GST Certificate",
 };
 
 interface DocUploadState {
@@ -96,6 +96,10 @@ function DocUploader({
 
   const handleFile = async (file: File) => {
     if (!file) return;
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      onChange({ ...value, error: "Please upload a PDF file" });
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       onChange({ ...value, error: "File must be under 5 MB" });
       return;
@@ -153,7 +157,7 @@ function DocUploader({
           {value.error ? (
             <><AlertCircle className="h-4 w-4" /> {value.error}</>
           ) : (
-            <><Upload className="h-4 w-4" /> Click to upload (PDF or image, max 5 MB)</>
+            <><Upload className="h-4 w-4" /> Click to upload (PDF, max 5 MB)</>
           )}
         </button>
       )}
@@ -161,7 +165,7 @@ function DocUploader({
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,image/*"
+        accept=".pdf,application/pdf"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -175,7 +179,7 @@ function DocUploader({
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState<Step>(1);
@@ -194,15 +198,11 @@ export default function RegisterPage() {
     city: "",
     state: "",
     pincode: "",
-    // Step 3 — KYC (urls stored after upload)
+    // Step 3 — KYC (url stored after upload)
     gstCertificateUrl: "",
-    aadhaarUrl: "",
   });
 
   const [gstDoc, setGstDoc] = useState<DocUploadState>({
-    file: null, url: null, uploading: false, error: null,
-  });
-  const [aadhaarDoc, setAadhaarDoc] = useState<DocUploadState>({
     file: null, url: null, uploading: false, error: null,
   });
 
@@ -228,8 +228,7 @@ export default function RegisterPage() {
     setError("");
 
     if (!gstDoc.url) { setError("Please upload your GST Certificate."); return; }
-    if (!aadhaarDoc.url) { setError("Please upload your Aadhaar document."); return; }
-    if (gstDoc.uploading || aadhaarDoc.uploading) { setError("Please wait for uploads to finish."); return; }
+    if (gstDoc.uploading) { setError("Please wait for uploads to finish."); return; }
 
     setSubmitting(true);
     try {
@@ -239,7 +238,6 @@ export default function RegisterPage() {
       const payload = {
         ...trimmed,
         gstCertificateUrl: gstDoc.url,
-        aadhaarUrl: aadhaarDoc.url,
       };
 
       const res = await fetch(`${API_BASE}/api/auth/register`, {
@@ -260,8 +258,9 @@ export default function RegisterPage() {
         );
       }
 
-      // 202 — account pending verification; redirect to waiting page
-      router.push("/pending-verification");
+      // 201 — GSTIN verified automatically, so sign straight in
+      await login(form.email.trim(), form.password);
+      router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
     } finally {
@@ -484,9 +483,9 @@ export default function RegisterPage() {
                 <div className="flex items-start gap-2">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                   <div>
-                    <p className="text-xs font-semibold text-amber-800">Why we verify your business</p>
+                    <p className="text-xs font-semibold text-amber-800">Instant GST verification</p>
                     <p className="mt-0.5 text-xs leading-relaxed text-amber-700">
-                      HostNexus is a verified B2B marketplace. We review documents to protect all parties and prevent fraud. Our team approves accounts within 24–48 hours.
+                      HostNexus is a verified B2B marketplace. We read the GSTIN from your certificate and check it with the GST registry, so an active registration gets you in right away.
                     </p>
                   </div>
                 </div>
@@ -494,22 +493,15 @@ export default function RegisterPage() {
 
               <DocUploader
                 label="GST Registration Certificate"
-                hint="15-character GSTIN certificate issued by the Government of India. Required for all registered businesses."
+                hint="Form GST REG-06 PDF downloaded from the GST portal. Scanned copies and photos can't be read."
                 value={gstDoc}
                 onChange={(s) => { setGstDoc(s); if (s.url) setForm((f) => ({ ...f, gstCertificateUrl: s.url! })); }}
-              />
-
-              <DocUploader
-                label="Aadhaar Card (Owner / Authorised Signatory)"
-                hint="For businesses without GST, Udyam / MSME registration is also accepted. Partial masking is fine."
-                value={aadhaarDoc}
-                onChange={(s) => { setAadhaarDoc(s); if (s.url) setForm((f) => ({ ...f, aadhaarUrl: s.url! })); }}
               />
 
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input type="checkbox" required className="mt-0.5 h-4 w-4 accent-emerald-600" />
                 <span className="text-xs text-stone-500">
-                  I confirm the documents are genuine and I agree to the{" "}
+                  I confirm the document is genuine and I agree to the{" "}
                   <Link href="#" className="text-emerald-600 underline hover:text-emerald-700">Terms of Service</Link>
                   {" "}and{" "}
                   <Link href="#" className="text-emerald-600 underline hover:text-emerald-700">Privacy Policy</Link>.
@@ -520,7 +512,7 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={submitting || gstDoc.uploading || aadhaarDoc.uploading}
+            disabled={submitting || gstDoc.uploading}
             className={cn(
               "flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white",
               "bg-emerald-600 shadow-[0_2px_8px_rgba(235,131,34,0.30)]",
@@ -530,11 +522,11 @@ export default function RegisterPage() {
             )}
           >
             {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <><Loader2 className="h-4 w-4 animate-spin" /> Verifying GSTIN…</>
             ) : step < 3 ? (
               <>Continue <ArrowRight className="h-4 w-4" /></>
             ) : (
-              <>Submit for Verification <FileText className="h-4 w-4" /></>
+              <>Verify GSTIN &amp; Create Account <FileText className="h-4 w-4" /></>
             )}
           </button>
         </motion.form>

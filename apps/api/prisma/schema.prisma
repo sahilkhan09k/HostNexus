@@ -22,7 +22,8 @@ model User {
 
   // KYC documents (URLs to uploaded files)
   gstCertificateUrl   String?  // GST Certificate — primary B2B identity doc
-  aadhaarUrl          String?  // Aadhaar — owner identity (fallback: Udyam reg)
+  aadhaarUrl          String?  // Aadhaar — legacy, no longer collected
+  gstin               String?  @unique // extracted from the certificate, verified via gstinapi.in
 
   // Owner personal info
   ownerName  String?

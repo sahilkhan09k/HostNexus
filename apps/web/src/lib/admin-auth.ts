@@ -27,6 +27,7 @@ export interface PendingUser {
   verificationNotes: string | null;
   gstCertificateUrl: string | null;
   aadhaarUrl: string | null;
+  gstin: string | null;
   createdAt: string;
   businesses: {
     id: string;

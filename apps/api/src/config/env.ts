@@ -13,6 +13,7 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
+  GSTIN_API_KEY: z.string().optional(),
   CHROMA_API_KEY: z.string().optional(),
   CHROMA_HOST: z.string().optional(),
   CHROMA_SERVER_URL: z.string().optional(),
