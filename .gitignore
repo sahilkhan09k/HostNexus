@@ -123,3 +123,7 @@ temp/
 context/
 specs/
 Six-File+Context+Methodology/
+
+# ─── User uploads (KYC docs, photos) ────
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
