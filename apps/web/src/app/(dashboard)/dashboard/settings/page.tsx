@@ -54,7 +54,7 @@ function ProfileTab() {
         <div className={cn(
           "mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium",
           toast.type === "success"
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            ? "border-green-200 bg-green-50 text-green-700"
             : "border-red-200 bg-red-50 text-red-700"
         )}>
           {toast.type === "success"
@@ -166,7 +166,7 @@ function BusinessTab() {
         <div className={cn(
           "mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium",
           toast.type === "success"
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            ? "border-green-200 bg-green-50 text-green-700"
             : "border-red-200 bg-red-50 text-red-700"
         )}>
           {toast.type === "success"
@@ -265,7 +265,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-bold text-stone-900">Settings</h1>
+        <h1 className="font-display text-3xl font-normal text-stone-900">Settings</h1>
         <p className="mt-1 text-sm text-stone-500">Manage your account and preferences</p>
       </div>
 
@@ -280,9 +280,9 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all",
+                  "flex w-full items-center gap-3 rounded-full px-4 py-3 text-sm font-medium transition-all",
                   activeTab === tab.id
-                    ? "bg-emerald-600 text-white"
+                    ? "bg-stone-900 text-white"
                     : "text-stone-600 hover:bg-stone-50"
                 )}
               >

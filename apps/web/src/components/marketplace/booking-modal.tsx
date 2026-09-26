@@ -212,7 +212,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
         {/* ── Success states ── */}
         {successState === "booked" && (
           <div className="p-8 text-center space-y-4">
-            <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+            <div className="w-14 h-14 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-8 h-8" />
             </div>
             <h3 className="text-lg font-bold text-stone-900">Booking Request Sent!</h3>
@@ -319,8 +319,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                   )}
                 </div>
               ) : (
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 flex items-center gap-2.5 text-xs text-emerald-900">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <div className="rounded-xl border border-green-100 bg-green-50/50 p-3 flex items-center gap-2.5 text-xs text-green-900">
+                  <ShieldCheck className="w-4 h-4 text-green-600 shrink-0" />
                   Pristine Condition Declared — Zero pre-existing wear.
                 </div>
               )}

@@ -47,7 +47,7 @@ export function NumberTicker({
   }, [isInView, value, duration]);
 
   return (
-    <span ref={ref} className={cn("font-mono tabular-nums", className)}>
+    <span ref={ref} className={cn("tabular-nums", className)}>
       {prefix}
       {display.toLocaleString("en-IN")}
       {suffix}

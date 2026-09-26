@@ -164,7 +164,7 @@ export default function DashboardMarketplacePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-stone-900">Browse Resources</h1>
+          <h1 className="font-display text-3xl font-normal text-stone-900">Browse Resources</h1>
           <p className="mt-1 text-sm text-stone-500">Discover resources from verified businesses across India</p>
         </div>
         <span className="rounded-xl bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-600 tabular-nums">
@@ -232,7 +232,7 @@ export default function DashboardMarketplacePage() {
                 className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
               <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
                 transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAF9] p-4 shadow-xl"
+                className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAFA] p-4 shadow-xl"
               >
                 <div className="mb-4 flex items-center justify-between">
                   <span className="font-bold text-stone-900">Filters</span>

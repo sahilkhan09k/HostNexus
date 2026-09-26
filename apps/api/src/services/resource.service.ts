@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { VectorStoreService } from "./rag/vector-store.js";
+import { getCommittedQuantities } from "./capacity.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
 
 export class ResourceService {
@@ -195,6 +196,7 @@ export class ResourceService {
     }
 
     // Date-availability server-side filter
+    let dateRange: { start: Date; end: Date } | null = null;
     if (query.startDate && query.endDate) {
       const start = new Date(query.startDate);
       const end   = new Date(query.endDate);
@@ -202,17 +204,11 @@ export class ResourceService {
         where.availabilityWindows = {
           some: { fromDate: { lte: start }, toDate: { gte: end } },
         };
-        where.bookingRequests = {
-          none: {
-            bookingStatus: { notIn: ["CANCELLED", "COMPLETED"] },
-            startDate: { lte: end },
-            endDate:   { gte: start },
-          },
-        };
+        dateRange = { start, end };
       }
     }
 
-    const resources = await prisma.resource.findMany({
+    let resources = await prisma.resource.findMany({
       where,
       include: {
         availabilityWindows: {
@@ -229,6 +225,14 @@ export class ResourceService {
       orderBy: { createdAt: "desc" },
     });
 
+    // Quantity-aware: hide a listing only when accepted/active bookings use up every unit.
+    // Pending requests don't hold stock (same rule as booking create/accept).
+    let committed = new Map<string, number>();
+    if (dateRange) {
+      committed = await getCommittedQuantities(resources.map((r) => r.id), dateRange.start, dateRange.end);
+      resources = resources.filter((r) => r.quantity - (committed.get(r.id) ?? 0) > 0);
+    }
+
     return resources.map((r) => {
       const reviews  = r.business.reviewsReceived ?? [];
       const asOwner  = reviews.filter(rv => rv.reviewerRole === "RENTER");
@@ -243,6 +247,7 @@ export class ResourceService {
           businessType: r.business.businessType,
           ownerRating, reviewCount: asOwner.length,
         },
+        ...(dateRange ? { availableQuantity: r.quantity - (committed.get(r.id) ?? 0) } : {}),
       };
     });
   }

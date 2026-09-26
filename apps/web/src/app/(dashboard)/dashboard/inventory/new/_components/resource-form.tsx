@@ -380,8 +380,8 @@ export default function ResourceForm({
             )}
           </div>
         ) : (
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 flex items-center gap-3 text-xs text-emerald-900">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <div className="rounded-xl border border-green-100 bg-green-50/60 p-4 flex items-center gap-3 text-xs text-green-900">
+            <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
             <div>
               <span className="font-semibold">Declared Pristine Condition:</span> You declare this resource is in good operating condition with no notable defects. Renters will verify this condition upon handover.
             </div>

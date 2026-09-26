@@ -111,9 +111,9 @@ function DocUploader({
 
       {value.url ? (
         /* Uploaded state */
-        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-          <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-          <span className="flex-1 truncate text-xs font-medium text-emerald-700">
+        <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-3">
+          <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
+          <span className="flex-1 truncate text-xs font-medium text-green-700">
             {value.file?.name ?? "Document uploaded"}
           </span>
           <button
@@ -275,13 +275,13 @@ export default function RegisterPage() {
           className="absolute inset-0 opacity-[0.06]"
           style={{ backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 opacity-90" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#16334A] via-[#0C1A26] to-[#0B0D11] opacity-95" />
 
         <div className="relative z-10">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/30">
-            <span className="text-lg font-black text-emerald-400">H</span>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
+            <span className="text-lg font-medium text-white">H</span>
           </div>
-          <h2 className="mt-8 font-display text-3xl font-extrabold leading-tight text-white">
+          <h2 className="mt-8 font-display text-4xl font-normal leading-[1.1] text-white">
             Join India&apos;s Hospitality Network
           </h2>
           <p className="mt-3 text-base leading-relaxed text-stone-400">
@@ -333,7 +333,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="mb-5">
-          <h1 className="font-display text-2xl font-bold text-stone-900">
+          <h1 className="font-display text-3xl font-normal text-stone-900">
             {step === 1 && "Create your account"}
             {step === 2 && "Business details"}
             {step === 3 && "Document verification"}
@@ -511,8 +511,8 @@ export default function RegisterPage() {
             disabled={submitting || gstDoc.uploading || aadhaarDoc.uploading}
             className={cn(
               "flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white",
-              "bg-emerald-600 shadow-[0_2px_8px_rgba(5,150,105,0.30)]",
-              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(5,150,105,0.40)]",
+              "bg-emerald-600 shadow-[0_2px_8px_rgba(235,131,34,0.30)]",
+              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(235,131,34,0.40)]",
               "transition-all duration-200 active:scale-[0.98]",
               "disabled:opacity-60 disabled:cursor-not-allowed"
             )}

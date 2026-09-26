@@ -57,8 +57,8 @@ export default function LoginPage() {
   return (
     <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-[0_20px_60px_-10px_rgba(0,0,0,0.12)] lg:grid-cols-2">
 
-      {/* â”€â”€ Left panel â€” branding â”€â”€ */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-emerald-600 p-10 lg:flex">
+      {/* ── Left panel — branding ── */}
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-stone-950 p-10 lg:flex">
         {/* Background pattern */}
         <div
           className="absolute inset-0 opacity-10"
@@ -67,35 +67,35 @@ export default function LoginPage() {
             backgroundSize: "24px 24px",
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-600 to-emerald-800 opacity-90" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#16334A] via-[#0C1A26] to-[#0B0D11] opacity-95" />
 
         <div className="relative z-10">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
             <span className="text-xl font-black text-white">H</span>
           </div>
-          <h2 className="mt-8 font-display text-3xl font-extrabold leading-tight text-white">
+          <h2 className="mt-8 font-display text-4xl font-normal leading-[1.1] text-white">
             Welcome back to HostNexus
           </h2>
-          <p className="mt-3 text-base leading-relaxed text-emerald-100">
+          <p className="mt-3 text-base leading-relaxed text-white/65">
             India&apos;s smartest B2B marketplace for hospitality resource sharing.
           </p>
         </div>
 
         <div className="relative z-10 space-y-3">
           {TRUST_POINTS.map((point) => (
-            <div key={point} className="flex items-center gap-2.5 text-sm text-emerald-100">
-              <CheckCircle className="h-4 w-4 shrink-0 text-emerald-300" />
+            <div key={point} className="flex items-center gap-2.5 text-sm text-white/75">
+              <CheckCircle className="h-4 w-4 shrink-0 text-emerald-400" />
               {point}
             </div>
           ))}
         </div>
 
-        <p className="relative z-10 text-xs text-emerald-300">
+        <p className="relative z-10 text-xs text-white/50">
           Trusted by 200+ businesses across Pune &amp; Mumbai
         </p>
       </div>
 
-      {/* â”€â”€ Right panel â€” form â”€â”€ */}
+      {/* ── Right panel — form ── */}
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
@@ -103,7 +103,7 @@ export default function LoginPage() {
         className="flex flex-col justify-center p-8 md:p-10"
       >
         <div className="mb-8">
-          <h1 className="font-display text-2xl font-bold text-stone-900">Sign in to your account</h1>
+          <h1 className="font-display text-3xl font-normal text-stone-900">Sign in to your account</h1>
           <p className="mt-1.5 text-sm text-stone-500">
             Don&apos;t have an account?{" "}
             <Link href="/register" className="font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
@@ -189,7 +189,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                placeholder="••••••••"
                 className={cn(
                   "w-full rounded-xl border border-stone-200 bg-stone-50 py-3 pl-10 pr-11 text-sm text-stone-800",
                   "placeholder:text-stone-400",
@@ -214,8 +214,8 @@ export default function LoginPage() {
             disabled={loading}
             className={cn(
               "flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white",
-              "bg-emerald-600 shadow-[0_2px_8px_rgba(5,150,105,0.30)]",
-              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(5,150,105,0.40)]",
+              "bg-emerald-600 shadow-[0_2px_8px_rgba(235,131,34,0.30)]",
+              "hover:bg-emerald-700 hover:shadow-[0_4px_16px_rgba(235,131,34,0.40)]",
               "transition-all duration-200 active:scale-[0.98]",
               "disabled:opacity-60 disabled:cursor-not-allowed"
             )}

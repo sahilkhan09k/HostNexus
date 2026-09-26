@@ -1,44 +1,112 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-plus-jakarta);
-  --font-display: var(--font-outfit);
+  /* HostNexus design system: one neo-grotesk family (Inter Tight) everywhere */
+  --font-sans: var(--font-inter-tight);
+  --font-display: var(--font-inter-tight);
   --font-mono: var(--font-geist-mono);
 
-  /* Light theme tokens */
-  --color-canvas: #FAFAF9;
+  /* Light theme tokens (mapped to the design system) */
+  --color-canvas: #FAFAFA;
   --color-surface: #FFFFFF;
-  --color-surface-2: #F5F5F4;
-  --color-border: #E7E5E4;
-  --color-border-hover: #A8A29E;
-  --color-primary: #059669;
-  --color-primary-hover: #047857;
-  --color-primary-light: #D1FAE5;
-  --color-text: #1C1917;
-  --color-muted: #78716C;
-  --color-subtle: #A8A29E;
+  --color-surface-2: #F4F4F5;
+  --color-border: #ECECEE;
+  --color-border-hover: #8E919A;
+  --color-primary: #EB8322;
+  --color-primary-hover: #D47219;
+  --color-primary-light: #FDEBD8;
+  --color-text: #131519;
+  --color-muted: #6B6E78;
+  --color-subtle: #8E919A;
   --color-amber: #D97706;
   --color-sky: #0284C7;
 }
+
+/*
+ * Design-system remap for the app pages. The pages are styled with Tailwind's
+ * stone (neutrals) and emerald (brand accent) scales, so pointing those scales at
+ * the HostNexus tokens restyles every page without touching its markup:
+ *   stone   → ink (slightly cool neutrals)
+ *   emerald → ember (the single accent; 600 = ember-500 for primary fills)
+ *   green   → success (status: available, verified, completed)
+ */
+@theme {
+  --color-stone-50: #F6F6F7;
+  --color-stone-100: #ECECEE;
+  --color-stone-200: #DCDDE1;
+  --color-stone-300: #B7B9C0;
+  --color-stone-400: #8E919A;
+  --color-stone-500: #6B6E78;
+  --color-stone-600: #44474F;
+  --color-stone-700: #2B2D33;
+  --color-stone-800: #1C1E23;
+  --color-stone-900: #131519;
+  --color-stone-950: #0B0D11;
+
+  --color-emerald-50: #FEF6EE;
+  --color-emerald-100: #FDEBD8;
+  --color-emerald-200: #FAD2A8;
+  --color-emerald-300: #F5AE66;
+  --color-emerald-400: #F09536;
+  --color-emerald-500: #EF8C2C;
+  --color-emerald-600: #EB8322;
+  --color-emerald-700: #C2651A;
+  --color-emerald-800: #9A4F12;
+  --color-emerald-900: #7A3E0E;
+  --color-emerald-950: #4A260A;
+
+  --color-green-50: #EEF8F3;
+  --color-green-100: #D5EFE2;
+  --color-green-200: #ABDDC4;
+  --color-green-300: #7CC8A3;
+  --color-green-400: #4FB283;
+  --color-green-500: #2E9D6A;
+  --color-green-600: #258257;
+  --color-green-700: #1E6846;
+  --color-green-800: #185338;
+  --color-green-900: #12402B;
+
+  /* Radii: media 14–20px, cards 20px */
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+  --radius-3xl: 28px;
+
+  /* Hierarchy comes from size, not weight */
+  --font-weight-bold: 600;
+  --font-weight-extrabold: 600;
+  --font-weight-black: 600;
+
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+}
+
+/* Every primary control is a pill (design system rule). */
+:is(button, a)[class*="bg-emerald-600"]:not([class*="h-7"]):not([class*="h-8"]):not([class*="h-9"]):not([class*="h-10"]) {
+  border-radius: 999px;
+}
+
+/* Headings: tight negative tracking like the design system's display type. */
+.font-display { letter-spacing: -0.025em; }
 
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 
 body {
-  background-color: #FAFAF9;
-  color: #1C1917;
-  font-family: var(--font-plus-jakarta, 'Plus Jakarta Sans', system-ui, sans-serif);
+  background-color: #FAFAFA;
+  color: #131519;
+  font-family: var(--font-inter-tight), "Inter Tight", system-ui, sans-serif;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
-::selection { background: #D1FAE5; color: #047857; }
+::selection { background: #FDEBD8; color: #9A4F12; }
 
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #F5F5F4; }
-::-webkit-scrollbar-thumb { background: #D6D3D1; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #059669; }
+::-webkit-scrollbar-track { background: #F4F4F5; }
+::-webkit-scrollbar-thumb { background: #DCDDE1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #EB8322; }
 
 /* Card shadows */
 .card-shadow { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -1px rgba(0,0,0,0.06); }
@@ -46,7 +114,7 @@ body {
 
 /* Gradient text */
 .gradient-text {
-  background: linear-gradient(135deg, #059669, #10B981);
+  background: linear-gradient(135deg, #EB8322, #F5AE66);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

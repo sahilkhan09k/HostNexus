@@ -54,8 +54,8 @@ const STATUS_META: Record<string, { label: string; dot: string; badge: string }>
   },
   accepted: {
     label: "Accepted",
-    dot: "bg-emerald-500",
-    badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    dot: "bg-green-500",
+    badge: "bg-green-50 text-green-700 border-green-200",
   },
   rejected: {
     label: "Rejected",
@@ -121,10 +121,10 @@ interface SummaryCardProps {
 function SummaryCard({ label, value, icon: Icon, iconBg }: SummaryCardProps) {
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_2px_12px_-2px_rgba(0,0,0,0.06)]">
-      <div className={cn("mb-3 flex h-9 w-9 items-center justify-center rounded-xl", iconBg)}>
+      <div className={cn("mb-3 flex h-9 w-9 items-center justify-center rounded-full", iconBg)}>
         <Icon className="h-[18px] w-[18px] text-white" />
       </div>
-      <p className="font-mono text-3xl font-extrabold tracking-tight text-stone-900">{value}</p>
+      <p className="font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{value}</p>
       <p className="mt-1 text-sm text-stone-500">{label}</p>
     </div>
   );
@@ -142,7 +142,7 @@ function InlineBar({ label, count, max }: InlineBarProps) {
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium capitalize text-stone-700">{label.replace(/_/g, " ")}</span>
-        <span className="font-mono text-sm font-semibold text-stone-900">{count}</span>
+        <span className="text-sm font-semibold tabular-nums text-stone-900">{count}</span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
         <div
@@ -171,7 +171,7 @@ function StatusRow({ status, count }: StatusRowProps) {
         <span className={cn("h-2.5 w-2.5 rounded-full", meta.dot)} />
         <span className="text-sm font-medium capitalize text-stone-700">{meta.label}</span>
       </div>
-      <span className="font-mono text-sm font-bold text-stone-900">{count}</span>
+      <span className="text-sm font-semibold tabular-nums text-stone-900">{count}</span>
     </div>
   );
 }
@@ -243,7 +243,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="font-display text-2xl font-bold text-stone-900">Analytics</h1>
+        <h1 className="font-display text-3xl font-normal text-stone-900">Analytics</h1>
         <p className="mt-1 text-sm text-stone-500">Your resource and booking performance</p>
       </div>
 
@@ -263,19 +263,19 @@ export default function AnalyticsPage() {
               label="Incoming Bookings"
               value={totalIncoming}
               icon={Calendar}
-              iconBg="bg-violet-600"
+              iconBg="bg-stone-900"
             />
             <SummaryCard
               label="Accepted Bookings"
               value={acceptedCount}
               icon={CheckCircle2}
-              iconBg="bg-sky-600"
+              iconBg="bg-stone-900"
             />
             <SummaryCard
               label="Pending Requests"
               value={pendingCount}
               icon={Clock}
-              iconBg="bg-amber-600"
+              iconBg="bg-stone-900"
             />
           </>
         )}

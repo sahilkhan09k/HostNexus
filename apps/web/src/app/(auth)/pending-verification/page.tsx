@@ -13,8 +13,8 @@ const EASE: Easing = [0.22, 1, 0.36, 1];
 const STEPS = [
   {
     icon: CheckCircle,
-    color: "text-emerald-600",
-    bg: "bg-emerald-100",
+    color: "text-green-600",
+    bg: "bg-green-100",
     title: "Documents Submitted",
     desc: "Your GST certificate and Aadhaar have been received.",
     done: true,
@@ -70,7 +70,7 @@ export default function PendingVerificationPage() {
             transition={{ duration: 0.35, delay: 0.2, ease: EASE }}
             className="text-center"
           >
-            <h1 className="font-display text-2xl font-bold text-stone-900">
+            <h1 className="font-display text-3xl font-normal text-stone-900">
               Application Under Review
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-stone-500">
@@ -102,7 +102,7 @@ export default function PendingVerificationPage() {
                     {!isLast && (
                       <div className={cn(
                         "mt-1 w-px flex-1",
-                        step.done ? "bg-emerald-300" : "bg-stone-200"
+                        step.done ? "bg-green-300" : "bg-stone-200"
                       )} style={{ minHeight: "28px" }} />
                     )}
                   </div>
@@ -186,7 +186,7 @@ export default function PendingVerificationPage() {
               href="/login"
               className={cn(
                 "flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold",
-                "bg-emerald-600 text-white shadow-[0_2px_8px_rgba(5,150,105,0.25)]",
+                "bg-emerald-600 text-white shadow-[0_2px_8px_rgba(235,131,34,0.25)]",
                 "hover:bg-emerald-700 transition-all"
               )}
             >

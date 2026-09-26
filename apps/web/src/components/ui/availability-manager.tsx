@@ -225,9 +225,9 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, x: -8 }}
                     transition={{ duration: 0.2, ease: EASE }}
-                    className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3"
+                    className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50/60 px-4 py-3"
                   >
-                    <CalendarDays className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <CalendarDays className="h-4 w-4 shrink-0 text-green-600" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-stone-800">
                         {fmt(w.fromDate)} → {fmt(w.toDate)}
@@ -343,7 +343,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+              className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
             >
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               Availability saved successfully
@@ -360,7 +360,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
               disabled={saving}
               className={cn(
                 "flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white",
-                "shadow-[0_2px_8px_rgba(5,150,105,0.25)] hover:bg-emerald-700 transition-all active:scale-[0.98]",
+                "shadow-[0_2px_8px_rgba(235,131,34,0.25)] hover:bg-emerald-700 transition-all active:scale-[0.98]",
                 "disabled:opacity-60 disabled:cursor-not-allowed"
               )}
             >

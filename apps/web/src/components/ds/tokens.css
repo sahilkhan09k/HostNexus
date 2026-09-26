@@ -1,0 +1,66 @@
+/*
+ * HostNexus design tokens (from the Claude Design handoff: tokens/*.css).
+ * Every token is prefixed `--hn-` so it can't collide with Tailwind v4 theme
+ * variables such as --radius-md, --shadow-md, --text-sm or --ease-out.
+ */
+:root {
+  /* Ember: the single accent */
+  --hn-ember-100: #FDEBD8; --hn-ember-200: #FAD2A8; --hn-ember-300: #F5AE66; --hn-ember-400: #F09536;
+  --hn-ember-500: #EB8322; --hn-ember-600: #D47219; --hn-ember-700: #AE5C14;
+  /* Ink neutrals (slightly cool) */
+  --hn-ink-950: #0B0D11; --hn-ink-900: #131519; --hn-ink-800: #1C1E23; --hn-ink-700: #2B2D33;
+  --hn-ink-600: #44474F; --hn-ink-500: #6B6E78; --hn-ink-400: #8E919A; --hn-ink-300: #B7B9C0;
+  --hn-ink-200: #DCDDE1; --hn-ink-100: #ECECEE; --hn-ink-50: #F4F4F5; --hn-ink-25: #FAFAFA; --hn-white: #FFFFFF;
+  /* Night: hero photo tint */
+  --hn-night-900: #0C1A26; --hn-night-700: #16334A; --hn-night-500: #2A5575;
+  /* Semantic */
+  --hn-success-500: #2E9D6A; --hn-danger-500: #D9463B; --hn-star: #F0A12C;
+  /* Aliases */
+  --hn-surface-page: var(--hn-white); --hn-surface-muted: var(--hn-ink-50); --hn-surface-subtle: var(--hn-ink-25);
+  --hn-surface-inverse: var(--hn-ink-950); --hn-surface-card-dark: var(--hn-ink-900);
+  --hn-text-strong: var(--hn-ink-900); --hn-text-body: var(--hn-ink-600); --hn-text-muted: var(--hn-ink-500);
+  --hn-text-faint: var(--hn-ink-300); --hn-text-inverse: var(--hn-white); --hn-text-inverse-muted: rgba(255, 255, 255, .62);
+  --hn-accent: var(--hn-ember-500); --hn-accent-hover: var(--hn-ember-600); --hn-accent-press: var(--hn-ember-700); --hn-on-accent: var(--hn-white);
+  --hn-border-default: var(--hn-ink-200); --hn-border-strong: var(--hn-ink-400); --hn-border-subtle: var(--hn-ink-100);
+  --hn-border-inverse: rgba(255, 255, 255, .22);
+  --hn-overlay-photo: linear-gradient(180deg, rgba(11, 13, 17, 0) 40%, rgba(11, 13, 17, .72) 100%);
+  --hn-overlay-hero: linear-gradient(180deg, rgba(12, 26, 38, .25) 0%, rgba(11, 13, 17, .55) 100%);
+  --hn-glass-dark: rgba(20, 22, 26, .55);
+
+  /* Typography (Inter Tight substitutes the unknown source neo-grotesk) */
+  --hn-font-sans: var(--font-inter-tight), "Inter Tight", "Inter", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --hn-weight-light: 300; --hn-weight-regular: 400; --hn-weight-medium: 500; --hn-weight-semibold: 600;
+  --hn-text-wordmark: clamp(120px, 24vw, 340px);
+  --hn-text-display-xl: 80px; --hn-text-display-l: 64px; --hn-text-h1: 56px; --hn-text-h2: 48px;
+  --hn-text-h3: 40px; --hn-text-h4: 28px; --hn-text-h5: 22px;
+  --hn-text-body-lg: 20px; --hn-text-body: 16px; --hn-text-sm: 14px; --hn-text-xs: 12px;
+  --hn-leading-tight: 1.05; --hn-leading-snug: 1.15; --hn-leading-normal: 1.4; --hn-leading-relaxed: 1.55;
+  --hn-tracking-display: -0.035em; --hn-tracking-heading: -0.025em; --hn-tracking-body: -0.005em; --hn-tracking-caps: 0.02em;
+
+  /* Spacing, layout, radii */
+  --hn-space-1: 4px; --hn-space-2: 8px; --hn-space-3: 12px; --hn-space-4: 16px; --hn-space-5: 20px; --hn-space-6: 24px;
+  --hn-space-8: 32px; --hn-space-10: 40px; --hn-space-12: 48px; --hn-space-16: 64px; --hn-space-20: 80px;
+  --hn-space-24: 96px; --hn-space-32: 128px;
+  --hn-container-max: 1280px; --hn-gutter: 64px; --hn-section-y: 112px;
+  --hn-radius-xs: 6px; --hn-radius-sm: 10px; --hn-radius-md: 14px; --hn-radius-lg: 20px; --hn-radius-xl: 28px; --hn-radius-pill: 999px;
+  --hn-control-h-sm: 36px; --hn-control-h-md: 44px; --hn-control-h-lg: 52px;
+
+  /* Effects & motion */
+  --hn-shadow-none: none;
+  --hn-shadow-sm: 0 1px 2px rgba(11, 13, 17, .06);
+  --hn-shadow-md: 0 8px 24px -8px rgba(11, 13, 17, .18);
+  --hn-shadow-lg: 0 24px 48px -16px rgba(11, 13, 17, .28);
+  --hn-ring-focus: 0 0 0 3px rgba(235, 131, 34, .35);
+  --hn-blur-glass: blur(14px);
+  --hn-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --hn-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --hn-dur-fast: 160ms; --hn-dur-base: 260ms; --hn-dur-slow: 600ms; --hn-dur-reveal: 900ms;
+}
+
+/* Tighter layout on small screens; the design only specifies desktop. */
+@media (max-width: 1024px) {
+  :root { --hn-gutter: 40px; --hn-section-y: 88px; }
+}
+@media (max-width: 640px) {
+  :root { --hn-gutter: 20px; --hn-section-y: 72px; }
+}

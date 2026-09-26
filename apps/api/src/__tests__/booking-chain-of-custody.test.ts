@@ -15,6 +15,7 @@ vi.mock("../config/database.js", () => ({
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn(),
       update: vi.fn(),
+      aggregate: vi.fn(),
     },
     inspection: {
       create: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("../config/database.js", () => ({
       create: vi.fn(),
     },
     $transaction: vi.fn((callback) => callback(prisma)),
+    $queryRaw: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -74,6 +76,76 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: nothing committed on overlapping dates
+    (prisma.bookingRequest.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({ _sum: { quantity: null } });
+  });
+
+  describe("quantity-aware conflict prevention", () => {
+    const chairs = { ...mockResource, id: "res-chairs", quantity: 100 };
+    const start = new Date(Date.now() + 86400000);
+    const end   = new Date(Date.now() + 86400000 * 3);
+
+    const pending = (quantity: number) => ({
+      id: "book-p", providerId: ownerBusiness.id, seekerId: renterBusiness.id, resourceId: chairs.id,
+      quantity, startDate: start, endDate: end,
+      bookingStatus: "BOOKING_REQUESTED", provider: ownerBusiness, seeker: renterBusiness,
+    });
+
+    const committed = (n: number | null) =>
+      (prisma.bookingRequest.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({ _sum: { quantity: n } });
+
+    it("allows a request while other bookings leave enough units free", async () => {
+      committed(10);
+      (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(renterBusiness);
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(chairs);
+      (prisma.bookingRequest.create as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ id: "b", ...data }));
+
+      const b = await BookingService.createBookingRequest(renterUserId, {
+        resourceId: chairs.id, quantity: 90, startDate: start.toISOString(), endDate: end.toISOString(),
+      });
+      expect(b.quantity).toBe(90);
+      expect(prisma.$queryRaw).toHaveBeenCalled(); // resource row locked
+    });
+
+    it("rejects a request that exceeds the units left for those dates", async () => {
+      committed(95);
+      (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(renterBusiness);
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(chairs);
+
+      await expect(
+        BookingService.createBookingRequest(renterUserId, {
+          resourceId: chairs.id, quantity: 10, startDate: start.toISOString(), endDate: end.toISOString(),
+        })
+      ).rejects.toThrow(/Only 5 of 100/);
+      expect(prisma.bookingRequest.create).not.toHaveBeenCalled();
+    });
+
+    it("re-checks capacity on accept: second overlapping request cannot be accepted", async () => {
+      committed(60); // another accepted booking already holds 60
+      (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
+      (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(pending(50));
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(chairs);
+
+      await expect(
+        BookingService.updateBookingStatus("book-p", ownerUserId, { status: "accepted" } as any)
+      ).rejects.toThrow(/Only 40 of 100/);
+      expect(prisma.bookingRequest.update).not.toHaveBeenCalled();
+
+      // The booking being accepted is excluded from its own committed total
+      const where = (prisma.bookingRequest.aggregate as ReturnType<typeof vi.fn>).mock.calls[0][0].where;
+      expect(where.id).toEqual({ not: "book-p" });
+    });
+
+    it("accepts when the request still fits", async () => {
+      committed(60);
+      (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
+      (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(pending(40));
+      (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(chairs);
+      (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...pending(40), ...data }));
+
+      const updated = await BookingService.updateBookingStatus("book-p", ownerUserId, { status: "accepted" } as any);
+      expect(updated.bookingStatus).toBe("BOOKING_ACCEPTED");
+    });
   });
 
   it("creates booking with commercial snapshot and exact paise calculations", async () => {

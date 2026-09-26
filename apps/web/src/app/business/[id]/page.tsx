@@ -84,14 +84,14 @@ function RatingCard({ label, rating, count, accent, index }: {
     >
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">{label}</p>
-        <div className={cn("flex h-8 w-8 items-center justify-center rounded-xl", accent)}>
+        <div className={cn("flex h-8 w-8 items-center justify-center rounded-full", accent)}>
           <Award className="h-4 w-4 text-white" />
         </div>
       </div>
       {rating !== null ? (
         <>
           <div className="flex items-end gap-2">
-            <span className="font-mono text-3xl font-extrabold text-stone-900">{rating.toFixed(1)}</span>
+            <span className="font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{rating.toFixed(1)}</span>
             <span className="mb-1 text-xs text-stone-400">/ 5</span>
           </div>
           <StarRow rating={rating} />
@@ -99,7 +99,7 @@ function RatingCard({ label, rating, count, accent, index }: {
         </>
       ) : (
         <div className="flex flex-col gap-1 pt-2">
-          <span className="font-mono text-2xl font-bold text-stone-300">—</span>
+          <span className="font-display text-3xl font-normal tabular-nums text-stone-300">—</span>
           <span className="text-xs text-stone-400">No reviews yet</span>
         </div>
       )}
@@ -207,7 +207,7 @@ export default function BusinessProfilePage() {
   // ── Loading ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF9] flex flex-col">
+      <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
         <Navbar />
         <div className="flex flex-1 items-center justify-center pt-24">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
@@ -220,7 +220,7 @@ export default function BusinessProfilePage() {
   // ── Error ──
   if (error || !profile) {
     return (
-      <div className="min-h-screen bg-[#FAFAF9] flex flex-col">
+      <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
         <Navbar />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 pt-24 text-center">
           <div className="rounded-full bg-rose-50 p-4 text-rose-500">
@@ -247,7 +247,7 @@ export default function BusinessProfilePage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-[#FAFAFA]">
       <Navbar />
 
       <main className="mx-auto max-w-screen-xl px-5 pt-24 pb-20 md:px-10 lg:px-16">
@@ -278,11 +278,11 @@ export default function BusinessProfilePage() {
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="font-display text-2xl font-extrabold text-stone-900">
+                <h1 className="font-display text-3xl font-normal text-stone-900">
                   {business.name}
                 </h1>
                 {business.owner.verificationStatus === "VERIFIED" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">
                     <ShieldCheck className="h-3 w-3" /> Verified
                   </span>
                 )}
@@ -311,7 +311,7 @@ export default function BusinessProfilePage() {
               {reputation.overallRating !== null && (
                 <div className="mt-3 flex items-center gap-2">
                   <StarRow rating={reputation.overallRating} size="lg" />
-                  <span className="font-mono text-lg font-bold text-stone-900">
+                  <span className="font-display text-xl font-medium text-stone-900">
                     {reputation.overallRating.toFixed(1)}
                   </span>
                   <span className="text-sm text-stone-400">
@@ -324,13 +324,13 @@ export default function BusinessProfilePage() {
             {/* Quick stats */}
             <div className="flex shrink-0 gap-4 sm:flex-col sm:items-end">
               <div className="text-center sm:text-right">
-                <p className="font-mono text-2xl font-extrabold text-stone-900 tabular-nums">
+                <p className="font-display text-3xl font-normal tabular-nums text-stone-900 tabular-nums">
                   {reputation.resourcesGiven}
                 </p>
                 <p className="text-xs text-stone-400">Resources rented out</p>
               </div>
               <div className="text-center sm:text-right">
-                <p className="font-mono text-2xl font-extrabold text-stone-900 tabular-nums">
+                <p className="font-display text-3xl font-normal tabular-nums text-stone-900 tabular-nums">
                   {reputation.resourcesTaken}
                 </p>
                 <p className="text-xs text-stone-400">Resources taken on rent</p>
@@ -361,7 +361,7 @@ export default function BusinessProfilePage() {
                   label="Rating as Renter"
                   rating={reputation.asRenterRating}
                   count={reputation.asRenterReviewCount}
-                  accent="bg-sky-600"
+                  accent="bg-stone-900"
                   index={1}
                 />
               </div>
@@ -442,17 +442,17 @@ export default function BusinessProfilePage() {
               <div className="divide-y divide-stone-100">
                 {[
                   { label: "Resources rented out", value: reputation.resourcesGiven,   icon: TrendingUp,   color: "bg-emerald-600" },
-                  { label: "Resources taken on rent", value: reputation.resourcesTaken, icon: TrendingDown, color: "bg-sky-600"     },
-                  { label: "Completed bookings",     value: reputation.completedBookings, icon: Award,     color: "bg-violet-600"  },
+                  { label: "Resources taken on rent", value: reputation.resourcesTaken, icon: TrendingDown, color: "bg-stone-900"     },
+                  { label: "Completed bookings",     value: reputation.completedBookings, icon: Award,     color: "bg-stone-900"  },
                 ].map(({ label, value, icon: Icon, color }) => (
                   <div key={label} className="flex items-center justify-between py-3">
                     <div className="flex items-center gap-2.5">
-                      <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg", color)}>
+                      <div className={cn("flex h-7 w-7 items-center justify-center rounded-full", color)}>
                         <Icon className="h-3.5 w-3.5 text-white" />
                       </div>
                       <span className="text-sm text-stone-600">{label}</span>
                     </div>
-                    <span className="font-mono text-base font-bold tabular-nums text-stone-900">
+                    <span className="text-base font-semibold tabular-nums text-stone-900">
                       {value}
                     </span>
                   </div>

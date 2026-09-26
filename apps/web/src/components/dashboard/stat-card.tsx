@@ -25,13 +25,13 @@ export function StatCard({ label, value, change, changeType, icon: Icon, iconBg,
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="text-xs font-medium uppercase tracking-wider text-stone-400">{label}</p>
-          <p className="mt-2 font-mono text-3xl font-extrabold tracking-tight text-stone-900">{value}</p>
+          <p className="mt-2 font-display text-4xl font-normal tracking-tight tabular-nums text-stone-900">{value}</p>
           {change && (
             <div className="mt-2 flex items-center gap-1.5">
               <span
                 className={cn(
                   "text-xs font-semibold",
-                  changeType === "positive" && "text-emerald-600",
+                  changeType === "positive" && "text-green-600",
                   changeType === "negative" && "text-rose-600",
                   changeType === "neutral" && "text-stone-400"
                 )}
@@ -42,7 +42,7 @@ export function StatCard({ label, value, change, changeType, icon: Icon, iconBg,
             </div>
           )}
         </div>
-        <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", iconBg)}>
+        <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-full", iconBg)}>
           <Icon className="h-5 w-5 text-white" />
         </div>
       </div>

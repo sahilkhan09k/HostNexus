@@ -169,7 +169,7 @@ export default function InventoryPage() {
               className={cn(
                 "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg backdrop-blur-md",
                 toast.type === "success" &&
-                  "border-emerald-200 bg-emerald-50 text-emerald-800",
+                  "border-green-200 bg-green-50 text-green-800",
                 toast.type === "error" &&
                   "border-rose-200 bg-rose-50 text-rose-800",
                 toast.type === "info" &&
@@ -177,7 +177,7 @@ export default function InventoryPage() {
               )}
             >
               {toast.type === "success" && (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
               )}
               {toast.type === "error" && (
                 <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
@@ -201,7 +201,7 @@ export default function InventoryPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-stone-900">
+          <h1 className="font-display text-3xl font-normal text-stone-900">
             Resource Inventory
           </h1>
           <p className="mt-1 text-sm text-stone-500">
@@ -211,7 +211,7 @@ export default function InventoryPage() {
         <button
           type="button"
           onClick={() => router.push("/dashboard/inventory/new")}
-          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(5,150,105,0.25)] transition-all hover:bg-emerald-700 active:scale-[0.98]"
+          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(235,131,34,0.25)] transition-all hover:bg-emerald-700 active:scale-[0.98]"
         >
           <Plus className="h-4 w-4" />
           List New Resource
@@ -348,7 +348,7 @@ export default function InventoryPage() {
                         className={cn(
                           "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold",
                           resource.isActive
-                            ? "bg-emerald-100 text-emerald-700"
+                            ? "bg-green-100 text-green-700"
                             : "bg-stone-100 text-stone-500"
                         )}
                       >

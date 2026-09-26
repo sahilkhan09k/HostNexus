@@ -245,7 +245,7 @@ function MarketplaceContent() {
     (filters.ratingMin > 0 ? 1 : 0);
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-[#FAFAFA]">
       <Navbar />
 
       {/* ── Search / controls header ── */}
@@ -374,7 +374,7 @@ function MarketplaceContent() {
                   animate={{ x: 0 }}
                   exit={{ x: "-100%" }}
                   transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                  className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAF9] p-4 shadow-xl"
+                  className="absolute inset-y-0 left-0 w-80 overflow-y-auto bg-[#FAFAFA] p-4 shadow-xl"
                 >
                   <div className="mb-4 flex items-center justify-between">
                     <span className="text-base font-bold text-stone-900">Filters</span>
@@ -481,7 +481,7 @@ function MarketplaceContent() {
 export default function MarketplacePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
       </div>
     }>

@@ -52,9 +52,9 @@ export function TopBar() {
           onKeyDown={handleSearchKeyDown}
           placeholder="Search resources, bookings, messages..."
           className={cn(
-            "w-full rounded-xl border border-stone-200 bg-stone-50 py-2 pl-10 pr-4",
+            "w-full rounded-full border border-stone-200 bg-stone-50 py-2.5 pl-10 pr-4",
             "text-sm text-stone-800 placeholder:text-stone-400",
-            "focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20",
+            "focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-[3px] focus:ring-emerald-500/35",
             "transition-all"
           )}
         />
@@ -64,7 +64,7 @@ export function TopBar() {
         <button
           type="button"
           className={cn(
-            "relative flex h-9 w-9 items-center justify-center rounded-xl",
+            "relative flex h-9 w-9 items-center justify-center rounded-full",
             "border border-stone-200 text-stone-400",
             "transition-colors hover:bg-stone-50 hover:text-stone-600"
           )}

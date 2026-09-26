@@ -84,7 +84,7 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
   const DAY: Record<string, string> = {
     empty: "", past: "text-stone-300 cursor-default",
     unavailable: "text-stone-300 bg-stone-50 cursor-default",
-    available: "bg-emerald-50 text-emerald-800 font-semibold hover:bg-emerald-100 cursor-pointer",
+    available: "bg-green-50 text-green-800 font-semibold hover:bg-green-100 cursor-pointer",
     booked: "bg-rose-100 text-rose-600 line-through cursor-not-allowed",
   };
 
@@ -109,7 +109,7 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-3 border-t border-stone-100 pt-3">
-        {[{ color: "bg-emerald-100", label: "Available" }, { color: "bg-rose-100", label: "Booked" }, { color: "bg-stone-100", label: "Unavailable" }].map(({ color, label }) => (
+        {[{ color: "bg-green-100", label: "Available" }, { color: "bg-rose-100", label: "Booked" }, { color: "bg-stone-100", label: "Unavailable" }].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1.5 text-[10px] text-stone-500">
             <span className={cn("h-3 w-3 rounded-sm", color)} />{label}
           </div>
@@ -155,7 +155,7 @@ function OwnerCard({ businessId, businessName, city, state, businessType }: {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="font-bold text-stone-900 truncate text-sm">{businessName}</p>
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-green-600" />
           </div>
           <div className="flex flex-wrap gap-2 text-xs text-stone-400 mt-0.5">
             {businessType && <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{businessType}</span>}
@@ -185,7 +185,7 @@ function OwnerCard({ businessId, businessName, city, state, businessType }: {
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="flex flex-col items-center gap-1 py-2.5">
                 <Icon className={cn("h-3.5 w-3.5", color)} />
-                <span className="font-mono text-sm font-extrabold text-stone-900 tabular-nums">{value}</span>
+                <span className="text-sm font-semibold tabular-nums text-stone-900 tabular-nums">{value}</span>
                 <span className="text-[9px] text-stone-400 text-center">{label}</span>
               </div>
             ))}
@@ -346,8 +346,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   if (success === "booked") {
     return (
       <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
-          <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50">
+          <CheckCircle2 className="h-7 w-7 text-green-600" />
         </div>
         <p className="font-bold text-stone-900">Request Sent!</p>
         <p className="text-xs text-stone-500">Owner will review and respond. Redirecting…</p>
@@ -434,13 +434,13 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
 
           {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">{error}</div>}
 
-          <div className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-800">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+          <div className="flex items-start gap-2 rounded-xl border border-green-100 bg-green-50 px-3 py-2.5 text-[11px] text-green-800">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" />
             <span>No charge until the owner accepts. Funds held in escrow after acceptance.</span>
           </div>
 
           <button type="submit" disabled={submitting}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(5,150,105,0.25)] hover:bg-emerald-700 transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(235,131,34,0.25)] hover:bg-emerald-700 transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Request to Book"}
           </button>
           <p className="text-center text-[10px] text-stone-400">You'll be notified when the owner responds</p>
@@ -627,7 +627,7 @@ export default function DashboardResourceDetailPage() {
           <div className="rounded-2xl border border-stone-200 bg-white p-5 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="font-display text-2xl font-bold text-stone-900">{resource.name}</h1>
+                <h1 className="font-display text-3xl font-normal text-stone-900">{resource.name}</h1>
                 <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-stone-500">
                   <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{resource.business.name}</span>
                   {resource.location && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-emerald-500" />{resource.location}</span>}
@@ -667,8 +667,8 @@ export default function DashboardResourceDetailPage() {
                 <h2 className="text-sm font-bold text-stone-900">Upcoming Availability</h2>
               </div>
               {upcomingWindows.map(w => (
-                <div key={w.id} className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <div key={w.id} className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 px-4 py-3">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
                   <div>
                     <p className="text-sm font-semibold text-stone-800">
                       {new Date(w.fromDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
@@ -686,13 +686,13 @@ export default function DashboardResourceDetailPage() {
           <div className="rounded-2xl border border-stone-200 bg-white p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                <ShieldCheck className="h-4 w-4 text-green-600" />
                 <h2 className="text-sm font-bold text-stone-900">Condition Disclosure</h2>
               </div>
               {resource.hasPreExistingDamage ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"><AlertTriangle className="h-3 w-3" /> Disclosed Wear</span>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800"><CheckCircle2 className="h-3 w-3" /> Pristine</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800"><CheckCircle2 className="h-3 w-3" /> Pristine</span>
               )}
             </div>
             {resource.hasPreExistingDamage ? (
@@ -712,8 +712,8 @@ export default function DashboardResourceDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-900">
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+              <div className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 p-3 text-xs text-green-900">
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
                 <span><span className="font-semibold">Declared Pristine.</span> You verify condition on physical handover.</span>
               </div>
             )}

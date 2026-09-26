@@ -43,7 +43,7 @@ export class AvailabilityController {
     } catch (err) { next(err); }
   }
 
-  /** GET /api/resources/:id/availability/check?startDate=&endDate=  — public */
+  /** GET /api/resources/:id/availability/check?startDate=&endDate=&quantity=  — public */
   static async checkAvailability(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const resourceId = String(req.params.id);
@@ -53,7 +53,8 @@ export class AvailabilityController {
         res.status(400).json({ success: false, error: { code: "MISSING_DATES", message: "startDate and endDate are required" } });
         return;
       }
-      const result = await AvailabilityService.checkAvailability(resourceId, startDate, endDate);
+      const quantity   = Math.max(1, parseInt(String(req.query.quantity ?? "1"), 10) || 1);
+      const result = await AvailabilityService.checkAvailability(resourceId, startDate, endDate, quantity);
       res.status(200).json({ success: true, data: result });
     } catch (err) { next(err); }
   }
