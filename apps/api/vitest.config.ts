@@ -41,5 +41,7 @@ export default defineConfig({
   plugins: [resolveJsToTs()],
   test: {
     globals: true,
+    // Weather lookups go to the network; tests that need them inject a fake fetch
+    env: { WEATHER_OFFLINE: "1" },
   },
 });

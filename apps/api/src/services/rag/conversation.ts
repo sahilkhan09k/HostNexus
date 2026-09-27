@@ -35,6 +35,8 @@ export interface ConciergeContext {
   search?: SearchContext;
   /** Listing ids shown in the last inventory answer, in display order */
   resultIds?: string[];
+  /** The last weather lookup, so "and tomorrow?" / "what about Mumbai?" can follow it */
+  weather?: { location: { label: string; city?: string }; startDate?: string; endDate?: string };
 }
 
 export type FollowUp =
