@@ -181,6 +181,7 @@ async function main() {
       quantity: r.quantity,
       unit: r.unit,
       location: r.location,
+      pricingBasis: "DAY", // every demo price is per day (allowed for all six categories)
       rentAmountPaise: r.rentRupees * 100,
       securityDepositPaise: r.depositRupees * 100,
       photos: [r.photo],

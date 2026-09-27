@@ -13,6 +13,7 @@ import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { rateSuffix } from "@/lib/pricing";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE: Easing = [0.22, 1, 0.36, 1];
@@ -30,7 +31,7 @@ interface BusinessProfile {
     owner: { verificationStatus: string };
     resources: {
       id: string; name: string; resourceType: string;
-      rentAmountPaise: number; location: string | null; photos: string[];
+      rentAmountPaise: number; pricingBasis?: string; location: string | null; photos: string[];
     }[];
   };
   reputation: {
@@ -502,7 +503,7 @@ export default function BusinessProfilePage() {
                             {resource.name}
                           </p>
                           <p className="text-xs text-stone-400">
-                            ₹{(resource.rentAmountPaise / 100).toLocaleString()}/day
+                            ₹{(resource.rentAmountPaise / 100).toLocaleString()}{rateSuffix(resource.pricingBasis)}
                             {resource.location && ` · ${resource.location}`}
                           </p>
                         </div>

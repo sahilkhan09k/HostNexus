@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database.js";
 import { getCommittedQuantities } from "../capacity.js";
 import { inclusiveDays, toCalendarDay } from "../booking-rules.js";
+import { billableUnits, PRICING_BASIS_UNIT, toPricingBasis } from "../pricing.js";
 import {
   ANY_CATALOG_ITEM,
   citiesIn,
@@ -36,8 +37,8 @@ interface Candidate {
   free: number;
   city?: string;
   locationFit: LocationFit;
-  estimatePaise: number; // rent for the requested quantity and days (deposit excluded)
-  withinBudget: boolean | null;
+  estimatePaise: number; // rent for the requested quantity and days (deposit excluded); per hour for hourly listings
+  withinBudget: boolean | null; // null = unknown (no budget, or an hourly listing whose total depends on hours booked)
   capacity?: number;
   capacityFit: CapacityFit;
 }
@@ -215,7 +216,7 @@ export class ListingRetriever {
 
     if (topics.compare && targets.length > 1) {
       const cheapest = [...targets].sort((a, b) => a.rentAmountPaise - b.rentAmountPaise)[0];
-      text += `💰 **Cheapest:** [${cheapest.name}](/marketplace/${cheapest.id}) at ${rupees(cheapest.rentAmountPaise)}/day.\n\n`;
+      text += `💰 **Cheapest:** [${cheapest.name}](/marketplace/${cheapest.id}) at ${rupees(cheapest.rentAmountPaise)}/${rateUnit(cheapest)}.\n\n`;
     }
 
     const cards: ResourceResultCard[] = [];
@@ -239,9 +240,13 @@ export class ListingRetriever {
         else lines.push(`❌ Not available${when}: fully booked or outside the owner's availability dates.`);
       }
       if (!specific || topics.price || topics.compare) {
-        const per = req.venue || l.quantity === 1 ? "per day" : `per ${l.unit || "unit"} per day`;
+        const per = req.venue || l.quantity === 1 ? `per ${rateUnit(l)}` : `per ${l.unit || "unit"} per ${rateUnit(l)}`;
         let line = `💰 Rent: **${rupees(l.rentAmountPaise)}** ${per}`;
-        if (units > 1 || days > 1) line += ` — ${units > 1 ? `${units} × ` : ""}${days} day${days === 1 ? "" : "s"} ≈ **${rupees(l.rentAmountPaise * units * days)}**`;
+        const estimate = rentEstimate(l, units, days);
+        if (estimate === null) line += ` — the total depends on how many hours you book each day`;
+        else if (units > 1 || (days > 1 && toPricingBasis(l.pricingBasis) === "DAY")) {
+          line += ` — ${units > 1 ? `${units} × ` : ""}${toPricingBasis(l.pricingBasis) === "EVENT" ? "1 event" : `${days} day${days === 1 ? "" : "s"}`} ≈ **${rupees(estimate)}**`;
+        }
         lines.push(`${line}.`);
       }
       if (!specific || topics.deposit || topics.price) {
@@ -272,7 +277,7 @@ export class ListingRetriever {
       cards.push(this.toCard(
         {
           l, free: start ? free : l.quantity, city: undefined, locationFit: "ANY",
-          estimatePaise: l.rentAmountPaise * units * days, withinBudget: null,
+          estimatePaise: rentEstimate(l, units, days) ?? l.rentAmountPaise * units, withinBudget: null,
           capacity, capacityFit: "N/A",
         },
         { ...req, quantity: undefined },
@@ -325,10 +330,14 @@ export class ListingRetriever {
       }
 
       const units = req.venue ? 1 : Math.min(req.quantity ?? 1, Math.max(free, 1));
-      const estimatePaise = ctx.budget?.basis === "per_day"
-        ? l.rentAmountPaise * (ctx.budget.perUnit ? 1 : units)
-        : l.rentAmountPaise * units * ctx.days;
-      const withinBudget = ctx.budget ? estimatePaise <= ctx.budget.amountPaise : null;
+      const hourly = toPricingBasis(l.pricingBasis) === "HOUR";
+      const estimatePaise = hourly
+        ? l.rentAmountPaise * units
+        : ctx.budget?.basis === "per_day"
+          // A flat per-event price is spread over the booked days to compare with a per-day budget
+          ? Math.round((rentEstimate(l, 1, ctx.days) ?? 0) / ctx.days) * (ctx.budget.perUnit ? 1 : units)
+          : rentEstimate(l, units, ctx.days) ?? 0;
+      const withinBudget = ctx.budget && !hourly ? estimatePaise <= ctx.budget.amountPaise : null;
 
       const capacity = req.venue ? statedCapacity(`${l.name} ${l.description ?? ""}`) : undefined;
       const capacityFit: CapacityFit = !req.venue || !request.guests ? "N/A"
@@ -443,8 +452,9 @@ export class ListingRetriever {
       business: res.business?.name ?? "",
       businessId: res.businessId,
       location: res.location ?? res.business?.city ?? "",
-      price: rentPaise > 0 ? `${rupees(rentPaise)}${countable ? `/${unitWord}` : ""}/day` : "Price on request",
+      price: rentPaise > 0 ? `${rupees(rentPaise)}${countable ? `/${unitWord}` : ""}/${rateUnit(res)}` : "Price on request",
       rentAmountPaise: rentPaise,
+      pricingBasis: toPricingBasis(res.pricingBasis),
       securityDepositPaise: depositPaise,
       securityDeposit: depositPaise > 0 ? rupees(depositPaise) : "None",
       capacity: c.capacity ? `${c.capacity} guests` : `${c.free} free`,
@@ -521,7 +531,7 @@ export class ListingRetriever {
         let left = need, cost = 0;
         for (const c of [...o.cards].sort((a, b) => a.rentAmountPaise - b.rentAmountPaise)) {
           const take = Math.min(left, c.quantityAvailable);
-          cost += take * c.rentAmountPaise * (request.budget!.basis === "per_day" ? 1 : days);
+          cost += take * c.rentAmountPaise * (request.budget!.basis === "per_day" ? 1 : billableUnits(c.pricingBasis, days));
           left -= take;
         }
         return sum + cost;
@@ -568,6 +578,18 @@ function altRank(c: Candidate) {
   // nearby before elsewhere; within budget before over budget
   const loc = c.locationFit === "NEARBY" ? 0 : c.locationFit === "ELSEWHERE" ? 2 : 1;
   return loc * 2 + (c.withinBudget === false ? 1 : 0);
+}
+
+/** "hour" | "day" | "event" — what one unit of this listing's rent buys */
+function rateUnit(l: { pricingBasis?: string | null }) {
+  return PRICING_BASIS_UNIT[toPricingBasis(l.pricingBasis)];
+}
+
+/** Rent for `units` units over `days` days; null for hourly listings, whose total depends on the hours booked */
+function rentEstimate(l: { rentAmountPaise: number; pricingBasis?: string | null }, units: number, days: number): number | null {
+  const basis = toPricingBasis(l.pricingBasis);
+  if (basis === "HOUR") return null;
+  return l.rentAmountPaise * units * billableUnits(basis, days);
 }
 
 function rupees(paise: number) {

@@ -15,6 +15,7 @@ const validComplete = {
   unit: "hall",
   location: "New York, NY",
   isActive: true,
+  pricingBasis: "HOUR" as const,
 };
 
 const validMinimal = {
@@ -22,6 +23,7 @@ const validMinimal = {
   resourceType: "Meeting Space" as const,
   quantity: 5,
   isActive: false,
+  pricingBasis: "DAY" as const, // allowed for every category
 };
 
 describe("resourceFormSchema", () => {
@@ -164,5 +166,25 @@ describe("resourceFormSchema", () => {
   it("passes when isActive is false", () => {
     const result = resourceFormSchema.safeParse({ ...validMinimal, isActive: false });
     expect(result.success).toBe(true);
+  });
+
+  // --- pricingBasis field ---
+
+  it("fails when pricingBasis is missing with 'Choose how this listing is charged'", () => {
+    const { pricingBasis: _, ...noBasis } = validMinimal;
+    const result = resourceFormSchema.safeParse(noBasis);
+    expect(result.success).toBe(false);
+    expect(getError(result, "pricingBasis")).toBe("Choose how this listing is charged");
+  });
+
+  it("fails when the category doesn't allow the pricing basis (banquet hall per event)", () => {
+    const result = resourceFormSchema.safeParse({ ...validComplete, pricingBasis: "EVENT" });
+    expect(result.success).toBe(false);
+    expect(getError(result, "pricingBasis")).toMatch(/can't be charged that way/);
+  });
+
+  it("passes for a banquet hall charged per hour or per day", () => {
+    expect(resourceFormSchema.safeParse({ ...validComplete, pricingBasis: "HOUR" }).success).toBe(true);
+    expect(resourceFormSchema.safeParse({ ...validComplete, pricingBasis: "DAY" }).success).toBe(true);
   });
 });

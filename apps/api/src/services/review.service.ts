@@ -184,7 +184,7 @@ export class ReviewService {
           where: { isActive: true, deletedAt: null },
           select: {
             id: true, name: true, resourceType: true,
-            rentAmountPaise: true, location: true, photos: true,
+            rentAmountPaise: true, pricingBasis: true, location: true, photos: true,
           },
           take: 6,
         },

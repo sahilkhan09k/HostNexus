@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { MAX_HOURS_PER_DAY, PRICING_BASIS_OPTION, PRICING_BASIS_UNIT, rentBreakdown, rentFor, toPricingBasis } from "@/lib/pricing";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -38,6 +39,7 @@ interface ResourceDetail {
   resourceType: string; quantity: number; unit: string | null;
   location: string | null; isActive: boolean;
   rentAmountPaise: number; securityDepositPaise: number;
+  pricingBasis?: string; // HOUR | DAY | EVENT (missing = per day)
   photos: string[]; hasPreExistingDamage: boolean;
   damageDescription: string | null; damagePhotos: string[];
   transportAvailable: boolean; transportRatePerKmPaise: number;
@@ -230,6 +232,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const { fetchWithAuth } = useAuth();
   const [tab, setTab]     = useState<"book" | "negotiate">("book");
   const [qty, setQty]     = useState(1);
+  // Hourly listings: hours needed on each booked day
+  const [hoursPerDay, setHoursPerDay] = useState(4);
   const [start, setStart] = useState("");
   const [end, setEnd]     = useState("");
   const [notes, setNotes] = useState("");
@@ -238,7 +242,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const [distanceKm, setDistanceKm]       = useState(0);
 
   // Negotiate-only
-  const [offerPerDay, setOfferPerDay] = useState<number>(
+  const [offerRate, setOfferRate] = useState<number>(
     Math.round(resource.rentAmountPaise / 100 * 0.9)
   );
   const [offerMsg, setOfferMsg] = useState("");
@@ -253,9 +257,14 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
     ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1)
     : null;
 
-  const listedPerDay    = resource.rentAmountPaise / 100;
+  // The listed rent is per unit per hour / day / event, as the owner chose
+  const basis           = toPricingBasis(resource.pricingBasis);
+  const rateUnit        = PRICING_BASIS_UNIT[basis];
+  const hourly          = basis === "HOUR";
+  const hours           = hourly ? hoursPerDay : null;
+  const listedRate      = resource.rentAmountPaise / 100;
   const depositINR      = resource.securityDepositPaise / 100;
-  const totalRent       = totalDays ? listedPerDay * totalDays * qty : null;
+  const totalRent       = totalDays ? rentFor(listedRate, basis, totalDays, hours, qty) : null;
 
   const transportOffered    = resource.transportAvailable && resource.transportRatePerKmPaise > 0;
   const usingOwnerTransport = transportOffered && transportMode === "PROVIDER";
@@ -265,7 +274,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
 
   const totalAmount     = totalRent !== null ? totalRent + depositINR + transportFeeINR : null;
 
-  const offerTotalRent  = totalDays ? offerPerDay * totalDays * qty : null;
+  const offerTotalRent  = totalDays ? rentFor(offerRate, basis, totalDays, hours, qty) : null;
   const offerTotal      = offerTotalRent !== null ? offerTotalRent + depositINR + transportFeeINR : null;
   const savingINR       = offerTotalRent !== null && totalRent !== null ? totalRent - offerTotalRent : null;
   const savingPct       = savingINR !== null && totalRent ? Math.round((savingINR / totalRent) * 100) : 0;
@@ -274,6 +283,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
     e.preventDefault();
     if (!start || !end) { setError("Please select start and end dates"); return; }
     if (usingOwnerTransport && !(distanceKm > 0)) { setError("Enter the distance in km to use the owner's transport"); return; }
+    if (hourly && !(hoursPerDay >= 1 && hoursPerDay <= MAX_HOURS_PER_DAY)) { setError(`Enter the hours you need each day (1–${MAX_HOURS_PER_DAY})`); return; }
     setSubmitting(true); setError("");
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/bookings`, {
@@ -284,6 +294,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           startDate: start, // calendar days, inclusive
           endDate:   end,
           specialRequests: notes || undefined,
+          hoursPerDay: hourly ? hoursPerDay : undefined,
           transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
           transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
         }),
@@ -303,7 +314,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
     e.preventDefault();
     if (!start || !end) { setError("Please select start and end dates"); return; }
     if (usingOwnerTransport && !(distanceKm > 0)) { setError("Enter the distance in km to use the owner's transport"); return; }
-    if (offerPerDay <= 0) { setError("Please enter a valid offer amount"); return; }
+    if (hourly && !(hoursPerDay >= 1 && hoursPerDay <= MAX_HOURS_PER_DAY)) { setError(`Enter the hours you need each day (1–${MAX_HOURS_PER_DAY})`); return; }
+    if (offerRate <= 0) { setError("Please enter a valid offer amount"); return; }
     setSubmitting(true); setError("");
     try {
       // 1. Create booking at listed price
@@ -315,6 +327,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           startDate: start, // calendar days, inclusive
           endDate:   end,
           specialRequests: notes || undefined,
+          hoursPerDay: hourly ? hoursPerDay : undefined,
           transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
           transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
         }),
@@ -331,7 +344,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          offeredAmountPaise: Math.round(offerPerDay * 100),
+          offeredAmountPaise: Math.round(offerRate * 100),
           message: offerMsg.trim() || undefined,
         }),
       });
@@ -369,6 +382,15 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed" />
         </div>
       </div>
+      {hourly && (
+        <div>
+          <label htmlFor="hoursPerDay" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Hours per Day</label>
+          <input id="hoursPerDay" type="number" min="1" max={MAX_HOURS_PER_DAY} step="1" required value={hoursPerDay || ""}
+            onChange={e => setHoursPerDay(Math.min(MAX_HOURS_PER_DAY, parseInt(e.target.value, 10) || 0))}
+            className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all" />
+          <p className="mt-1 text-[10px] text-stone-400">Charged per hour on each booked day. The whole day is reserved for you.</p>
+        </div>
+      )}
     </>
   );
 
@@ -486,10 +508,10 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           {/* Price summary */}
           <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2">
             <div className="flex items-baseline justify-between">
-              <span className="text-xs text-stone-500">Daily Rent</span>
+              <span className="text-xs text-stone-500">{PRICING_BASIS_OPTION[basis].label.replace(" (flat)", "")} Rent</span>
               <span className="text-xl font-black text-stone-900">
-                ₹{listedPerDay.toLocaleString()}
-                <span className="text-xs font-normal text-stone-400"> / day</span>
+                ₹{listedRate.toLocaleString()}
+                <span className="text-xs font-normal text-stone-400"> / {rateUnit}</span>
               </span>
             </div>
             <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
@@ -504,7 +526,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             )}
             {totalAmount !== null && (
               <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
-                <span className="font-semibold text-stone-700">Total ({totalDays}d rent + deposit{usingOwnerTransport ? " + transport" : ""})</span>
+                <span className="font-semibold text-stone-700">Total ({rentBreakdown(basis, totalDays!, hours, listedRate)} × {qty} + deposit{usingOwnerTransport ? " + transport" : ""})</span>
                 <span className="font-black text-stone-900">₹{totalAmount.toLocaleString()}</span>
               </div>
             )}
@@ -543,26 +565,26 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-3">
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
-                Your Offer per Day (₹) *
+                Your Offer per {rateUnit} (₹) *
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 font-medium text-sm">₹</span>
                 <input
                   type="number" min="1" required
-                  value={offerPerDay || ""}
-                  onChange={e => setOfferPerDay(parseFloat(e.target.value) || 0)}
-                  placeholder={String(Math.round(listedPerDay * 0.85))}
+                  value={offerRate || ""}
+                  onChange={e => setOfferRate(parseFloat(e.target.value) || 0)}
+                  placeholder={String(Math.round(listedRate * 0.85))}
                   className="w-full rounded-xl border border-amber-300 bg-white pl-7 pr-3 py-2.5 text-base font-bold text-stone-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-all"
                 />
               </div>
-              <p className="mt-1 text-[10px] text-stone-500">Listed price: <span className="font-semibold">₹{listedPerDay.toLocaleString()}/day</span></p>
+              <p className="mt-1 text-[10px] text-stone-500">Listed price: <span className="font-semibold">₹{listedRate.toLocaleString()}/{rateUnit}</span></p>
             </div>
 
             {/* Live savings callout */}
-            {offerPerDay > 0 && totalDays && (
+            {offerRate > 0 && totalDays && (
               <div className="rounded-lg border border-amber-200 bg-white p-3 space-y-1.5 text-xs">
                 <div className="flex justify-between text-stone-600">
-                  <span>Offer rent ({totalDays}d × ₹{offerPerDay.toLocaleString()} × {qty}):</span>
+                  <span>Offer rent ({rentBreakdown(basis, totalDays, hours, offerRate)} × {qty}):</span>
                   <span className="font-semibold">₹{(offerTotalRent ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-stone-600">
@@ -618,7 +640,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             </span>
           </div>
 
-          <button type="submit" disabled={submitting || offerPerDay <= 0}
+          <button type="submit" disabled={submitting || offerRate <= 0}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(245,158,11,0.3)] hover:bg-amber-600 transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : (
               <><TrendingDown className="h-4 w-4" /> Send Counter-Offer</>
@@ -744,6 +766,7 @@ export default function DashboardResourceDetailPage() {
             <div className="grid grid-cols-2 gap-3 border-t border-stone-100 pt-4 text-xs sm:grid-cols-3">
               {[
                 { label: "Type",     value: resource.resourceType },
+                { label: "Price",    value: `₹${(resource.rentAmountPaise / 100).toLocaleString()} per ${PRICING_BASIS_UNIT[toPricingBasis(resource.pricingBasis)]}` },
                 { label: "Quantity", value: `${resource.quantity} ${resource.unit ?? "units"}` },
                 { label: "Location", value: resource.location ?? "On request" },
               ].map(({ label, value }) => (

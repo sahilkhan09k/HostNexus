@@ -2,6 +2,7 @@ import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { BookingService, MAX_ORDER_PAISE, MIN_ORDER_PAISE } from "./booking.service.js";
 import { notifyBookingEvent } from "./notifications/booking-notifications.js";
+import { PRICING_BASIS_UNIT, rentFor, toPricingBasis } from "./pricing.js";
 import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
 
 // ─── Logic ───────────────────────────────────────────────────
@@ -13,7 +14,7 @@ import { conflict, forbidden, notFound, unprocessable } from "../utils/http-erro
 //      - Renter sends initial offer (lower than listed price)
 //      - Owner counters or accepts
 //   3. Counter-offers ping-pong until:
-//      a) One side accepts → booking re-priced at the agreed per-unit daily rate and accepted
+//      a) One side accepts → booking re-priced at the agreed per-unit rate (per hour/day/event) and accepted
 //      b) Either side rejects → negotiation REJECTED, booking can still be
 //         accepted at listed price (owner's prerogative) or cancelled
 //
@@ -25,7 +26,7 @@ import { conflict, forbidden, notFound, unprocessable } from "../utils/http-erro
 /** The only state in which the price of a booking may still change */
 const NEGOTIABLE = { bookingStatus: "BOOKING_REQUESTED", financialStatus: "PENDING_PAYMENT" } as const;
 
-/** Offers below this share of the listed daily rent are refused */
+/** Offers below this share of the listed rent are refused */
 export const MIN_OFFER_RATIO = 0.3;
 
 function assertNegotiable(booking: { bookingStatus: string; financialStatus: string }) {
@@ -88,16 +89,19 @@ export class NegotiationService {
 
     assertNegotiable(booking);
 
-    const listedDaily = booking.resource.rentAmountPaise;
-    if (listedDaily > 0 && offeredAmountPaise < Math.ceil(listedDaily * MIN_OFFER_RATIO)) {
+    // Offers are per unit per hour / day / event — the basis the booking was priced with
+    const rateUnit = PRICING_BASIS_UNIT[toPricingBasis(booking.pricingBasis)];
+    // The rate this booking was priced at, not the listing's current one: the owner may
+    // have changed the listing's rate or basis since, and offers are in the booking's unit.
+    const units = rentFor(1, booking);
+    const listedRate = units > 0 ? Math.round(booking.rentAmountPaise / units) : booking.resource.rentAmountPaise;
+    if (listedRate > 0 && offeredAmountPaise < Math.ceil(listedRate * MIN_OFFER_RATIO)) {
       throw unprocessable(
-        `Offers must be at least ${Math.round(MIN_OFFER_RATIO * 100)}% of the listed daily rate (₹${(Math.ceil(listedDaily * MIN_OFFER_RATIO) / 100).toLocaleString()})`,
+        `Offers must be at least ${Math.round(MIN_OFFER_RATIO * 100)}% of the listed rate (₹${(Math.ceil(listedRate * MIN_OFFER_RATIO) / 100).toLocaleString()} per ${rateUnit})`,
         "OFFER_TOO_LOW"
       );
     }
-    // Offers are per unit per day, like the listed rent
-    const totalDays = booking.totalDays ?? 1;
-    const newTotal = offeredAmountPaise * totalDays * booking.quantity + booking.securityDepositPaise + booking.transportFeePaise;
+    const newTotal = rentFor(offeredAmountPaise, booking) + booking.securityDepositPaise + booking.transportFeePaise;
     if (!Number.isSafeInteger(newTotal) || newTotal > MAX_ORDER_PAISE) {
       throw unprocessable("Offer amount is too large", "INVALID_OFFER");
     }
@@ -152,7 +156,7 @@ export class NegotiationService {
         business.id,
         isSeeker ? "RENTER" : "OWNER",
         `${isSeeker ? "Renter" : "Owner"} made a counter-offer`,
-        `${business.name} offered ₹${(offeredAmountPaise / 100).toLocaleString()} per day${message ? `: "${message}"` : "."}`
+        `${business.name} offered ₹${(offeredAmountPaise / 100).toLocaleString()} per ${rateUnit}${message ? `: "${message}"` : "."}`
       );
 
       return offer;
@@ -171,7 +175,7 @@ export class NegotiationService {
    * Accept the current pending offer.
    * Goes through the same locked, capacity-checked path as a normal owner
    * accept (payment deadline included), re-prices the rent at the agreed
-   * daily rate and closes the thread.
+   * rate (per hour / day / event) and closes the thread.
    */
   static async acceptOffer(userId: string, bookingId: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
@@ -202,8 +206,7 @@ export class NegotiationService {
 
     // Read the offer to learn the agreed rate, then re-validate it under the locks.
     const agreedRate = (await loadOffer(prisma)).latestOffer.offeredAmountPaise;
-    const newTotalPaise =
-      agreedRate * (booking.totalDays ?? 1) * booking.quantity + booking.securityDepositPaise + booking.transportFeePaise;
+    const newTotalPaise = rentFor(agreedRate, booking) + booking.securityDepositPaise + booking.transportFeePaise;
     if (newTotalPaise < MIN_ORDER_PAISE || newTotalPaise > MAX_ORDER_PAISE) {
       throw unprocessable("The negotiated total is out of range", "INVALID_OFFER");
     }
@@ -219,7 +222,7 @@ export class NegotiationService {
       await BookingService.recordTimelineEvent(
         bookingId, "NEGOTIATION_ACCEPTED", business.id, isSeeker ? "RENTER" : "OWNER",
         "Negotiated price accepted",
-        `${business.name} accepted the offer of ₹${(agreedRate / 100).toLocaleString()}/day.`,
+        `${business.name} accepted the offer of ₹${(agreedRate / 100).toLocaleString()}/${PRICING_BASIS_UNIT[toPricingBasis(booking.pricingBasis)]}.`,
         null, tx
       );
     });

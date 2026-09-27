@@ -4,7 +4,8 @@ import { VectorStoreService } from "./rag/vector-store.js";
 import { getCommittedQuantities, getPeakCommittedQuantity } from "./capacity.js";
 import { TERMINAL_BOOKING_STATUSES, todayIst } from "./booking-rules.js";
 import { resolveOwnedMedia } from "./evidence.js";
-import { conflict, forbidden, notFound } from "../utils/http-error.js";
+import { defaultPricingBasis, isPricingBasisAllowed, PRICING_BASIS_UNIT, toPricingBasis } from "./pricing.js";
+import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
 import { pageArgs, toPage, type Pagination } from "../utils/pagination.js";
 import type { CreateResourceInput, UpdateResourceInput, ResourceQuery } from "../schemas/resource.schema.js";
 
@@ -59,6 +60,7 @@ export class ResourceService {
         status: input.status,
         location: input.location || null,
         isActive: input.isActive,
+        pricingBasis: input.pricingBasis ?? defaultPricingBasis(input.resourceType),
         rentAmountPaise: input.rentAmountPaise,
         securityDepositPaise: input.securityDepositPaise,
         photos: photos.map((p) => p.fileUrl),
@@ -177,6 +179,19 @@ export class ResourceService {
         throw conflict(
           `Accepted bookings need up to ${peak} unit(s) on a single day, so the quantity can't go below ${peak}.`,
           "QUANTITY_BELOW_BOOKED"
+        );
+      }
+    }
+
+    // The pricing basis must suit the (possibly new) category. Open bookings keep
+    // the basis they were priced with, so changing it only affects new bookings.
+    if (input.resourceType !== undefined || input.pricingBasis !== undefined) {
+      const resourceType = input.resourceType ?? resource.resourceType;
+      const pricingBasis = input.pricingBasis ?? toPricingBasis(resource.pricingBasis);
+      if (!isPricingBasisAllowed(resourceType, pricingBasis)) {
+        throw unprocessable(
+          `"${resourceType}" listings can't be charged per ${PRICING_BASIS_UNIT[pricingBasis]}. Choose how this listing is charged.`,
+          "INVALID_PRICING_BASIS"
         );
       }
     }

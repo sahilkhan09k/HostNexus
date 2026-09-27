@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger.js";
 import { NotificationService, type NotifyInput } from "./notification.service.js";
 import { emitToUser, REALTIME_EVENTS } from "./realtime.service.js";
 import type { NotificationType } from "./notification-types.js";
+import { PRICING_BASIS_UNIT, toPricingBasis } from "../pricing.js";
 
 /**
  * Booking & negotiation events → who is told what.
@@ -60,6 +61,8 @@ export interface BookingContext {
   totalAmountPaise: number;
   securityDepositPaise: number;
   rejectionReason: string | null;
+  /** What one unit of the rent/offers buys: "hour" | "day" | "event" (defaults to "day") */
+  rateUnit?: string;
   owner: Party;
   renter: Party;
 }
@@ -105,6 +108,7 @@ async function loadContext(bookingId: string): Promise<BookingContext | null> {
       totalAmountPaise: true,
       securityDepositPaise: true,
       rejectionReason: true,
+      pricingBasis: true,
       resource: { select: { id: true, name: true } },
       seeker: PARTY,
       provider: PARTY,
@@ -130,6 +134,7 @@ async function loadContext(bookingId: string): Promise<BookingContext | null> {
     totalAmountPaise: b.totalAmountPaise,
     securityDepositPaise: b.securityDepositPaise,
     rejectionReason: b.rejectionReason,
+    rateUnit: PRICING_BASIS_UNIT[toPricingBasis(b.pricingBasis)],
     owner: party(b.provider),
     renter: party(b.seeker),
   };
@@ -344,13 +349,13 @@ export function buildBookingNotifications(ctx: BookingContext, event: BookingEve
 
     case "NEGOTIATION_OFFER":
       to(other(event.by), "NEGOTIATION_OFFER", "New price offer",
-        `${nameOf(event.by)} offered ${rupees(event.amountPaise)} per day for ${item}.${event.message ? ` "${clip(event.message)}"` : ""} Accept, counter or decline.`,
-        { details: [...baseDetails, { label: "Offer (per day)", value: rupees(event.amountPaise) }], ctaLabel: "Respond to offer" });
+        `${nameOf(event.by)} offered ${rupees(event.amountPaise)} per ${ctx.rateUnit ?? "day"} for ${item}.${event.message ? ` "${clip(event.message)}"` : ""} Accept, counter or decline.`,
+        { details: [...baseDetails, { label: `Offer (per ${ctx.rateUnit ?? "day"})`, value: rupees(event.amountPaise) }], ctaLabel: "Respond to offer" });
       break;
 
     case "NEGOTIATION_ACCEPTED":
       to(other(event.by), "NEGOTIATION_ACCEPTED", "Offer accepted",
-        `${nameOf(event.by)} accepted ${rupees(event.amountPaise)} per day for ${item}. The booking is confirmed at the agreed price${other(event.by) === "RENTER" ? " — pay into escrow to lock it in" : ""}.`,
+        `${nameOf(event.by)} accepted ${rupees(event.amountPaise)} per ${ctx.rateUnit ?? "day"} for ${item}. The booking is confirmed at the agreed price${other(event.by) === "RENTER" ? " — pay into escrow to lock it in" : ""}.`,
         { details: [...baseDetails, { label: "Booking total", value: rupees(ctx.totalAmountPaise) }] });
       break;
 

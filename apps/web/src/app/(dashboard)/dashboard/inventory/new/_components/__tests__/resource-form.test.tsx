@@ -57,6 +57,7 @@ const defaultMockReturn = {
     unit: "",
     location: "",
     isActive: true,
+    pricingBasis: "" as "" | "HOUR" | "DAY" | "EVENT",
     rentAmount: 0,
     securityDeposit: 0,
     photos: [],
@@ -230,5 +231,34 @@ describe("ResourceForm", () => {
     render(<ResourceForm />);
     const quantityInput = screen.getByRole("spinbutton", { name: /available quantity/i }) as HTMLInputElement;
     expect(quantityInput.value).toBe("1");
+  });
+
+  // ── Pricing basis ─────────────────────────────────────────────────────────
+
+  it("asks for a category before offering pricing options", () => {
+    render(<ResourceForm />);
+    const basis = screen.getByLabelText(/charged/i) as HTMLSelectElement;
+    expect(basis.disabled).toBe(true);
+    expect(basis.textContent).toMatch(/select a category first/i);
+    expect(screen.getByLabelText(/^rent \(₹ inr\)/i)).toBeInTheDocument();
+  });
+
+  it("offers only the category's bases and prices the rent in the chosen unit", () => {
+    setupMock({ values: { ...defaultMockReturn.values, resourceType: "Banquet Hall", pricingBasis: "HOUR" } });
+    render(<ResourceForm />);
+    const basis = screen.getByLabelText(/charged/i) as HTMLSelectElement;
+    expect(Array.from(basis.options).map((o) => o.value)).toEqual(["DAY", "HOUR"]);
+    expect(basis.value).toBe("HOUR");
+    expect(screen.getByLabelText(/rent per hour/i)).toBeInTheDocument();
+
+    fireEvent.change(basis, { target: { value: "DAY" } });
+    expect(mockHandleChange).toHaveBeenCalledWith("pricingBasis", "DAY");
+  });
+
+  it("labels a flat per-event price", () => {
+    setupMock({ values: { ...defaultMockReturn.values, resourceType: "Crockery/Cutlery", pricingBasis: "EVENT" } });
+    render(<ResourceForm />);
+    expect(screen.getByLabelText(/rent per event/i)).toBeInTheDocument();
+    expect(screen.getByText(/one flat price per booking/i)).toBeInTheDocument();
   });
 });

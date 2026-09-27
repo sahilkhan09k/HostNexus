@@ -26,6 +26,7 @@ interface ApiResource {
   location: string | null;
   isActive: boolean;
   rentAmountPaise?: number;
+  pricingBasis?: string;
   securityDepositPaise?: number;
   photos?: string[];
   hasPreExistingDamage?: boolean;
@@ -65,7 +66,7 @@ function mapApiResource(r: ApiResource): ResourceCardData {
     rating: r.business.ownerRating ?? null, reviews: r.business.reviewCount ?? 0,
     available: r.isActive, availableText: r.isActive ? "Available" : "Unavailable",
     tags: [r.resourceType], imageBg: style.imageBg,
-    rentAmountPaise: r.rentAmountPaise, securityDepositPaise: r.securityDepositPaise,
+    rentAmountPaise: r.rentAmountPaise, pricingBasis: r.pricingBasis, securityDepositPaise: r.securityDepositPaise,
     photos: r.photos, hasPreExistingDamage: r.hasPreExistingDamage,
     damageDescription: r.damageDescription, damagePhotos: r.damagePhotos,
     transportAvailable: r.transportAvailable, transportRatePerKmPaise: r.transportRatePerKmPaise,

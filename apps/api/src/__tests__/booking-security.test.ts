@@ -282,6 +282,15 @@ describe("H-03 — prices can't change after the owner accepts / renter pays", (
     const id = await requested();
     await expect(NegotiationService.makeOffer(RENTER, id, 1)).rejects.toMatchObject({ code: "OFFER_TOO_LOW" });
   });
+
+  it("keeps the floor at the rate the booking was priced with after the listing changes", async () => {
+    const id = await requested(); // per day at RENT
+    // Owner switches the listing to a cheap hourly rate while the request is open
+    await prisma.resource.update({ where: { id: "res-1" }, data: { pricingBasis: "HOUR", rentAmountPaise: 10_000 } });
+    // 30% of the new hourly rate would be ₹30 — the floor must stay 30% of the booked daily rate
+    await expect(NegotiationService.makeOffer(RENTER, id, 5_000)).rejects.toMatchObject({ code: "OFFER_TOO_LOW" });
+    await expect(NegotiationService.makeOffer(RENTER, id, Math.ceil(RENT * 0.3))).resolves.toBeTruthy();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -53,6 +53,8 @@ export interface ResourceResultCard {
   location: string;
   price: string;
   rentAmountPaise: number;
+  /** HOUR | DAY | EVENT — what one rentAmountPaise buys */
+  pricingBasis?: string;
   securityDepositPaise: number;
   securityDeposit: string;
   capacity: string;

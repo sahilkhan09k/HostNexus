@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, DollarSign, Info, Loader2, ShieldCheck, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RESOURCE_TYPES } from "@/schemas/resource.schema";
+import { allowedPricingBases, PRICING_BASIS_OPTION, PRICING_BASIS_UNIT, type PricingBasis } from "@/lib/pricing";
 import { useResourceForm, type FormValues } from "../_hooks/use-resource-form";
 import { ImageUploader } from "@/components/ui/image-uploader";
 import AvailabilityManager, { type AvailabilityManagerHandle } from "@/components/ui/availability-manager";
@@ -73,6 +74,9 @@ export default function ResourceForm({
 
   const [dismissedError, setDismissedError] = useState<string | null>(null);
 
+  const basisOptions = values.resourceType ? allowedPricingBases(values.resourceType) : [];
+  const rateUnit = values.pricingBasis ? PRICING_BASIS_UNIT[values.pricingBasis] : null;
+
   return (
     <form onSubmit={(event) => { setDismissedError(null); void _handleSubmit(event); }} className="space-y-8 w-full max-w-6xl mx-auto">
       {submitError && dismissedError !== submitError && (
@@ -134,6 +138,32 @@ export default function ResourceForm({
           </div>
 
           <div>
+            <label htmlFor="pricingBasis" className={LABEL_BASE}>Charged *</label>
+            <select
+              id="pricingBasis"
+              name="pricingBasis"
+              value={values.pricingBasis}
+              disabled={isSubmitting || !values.resourceType}
+              onChange={(e) => handleChange("pricingBasis", e.target.value as PricingBasis)}
+              onBlur={() => handleBlur("pricingBasis")}
+              className={cn(INPUT_BASE, touched.pricingBasis && errors.pricingBasis && INPUT_ERROR)}
+            >
+              {!values.resourceType && <option value="">Select a category first</option>}
+              {basisOptions.map((basis) => (
+                <option key={basis} value={basis}>{PRICING_BASIS_OPTION[basis].label}</option>
+              ))}
+            </select>
+            {touched.pricingBasis && errors.pricingBasis ? (
+              <p className={ERROR_BASE}>{errors.pricingBasis}</p>
+            ) : values.pricingBasis ? (
+              <p className="text-[11px] text-stone-400 mt-1">
+                {PRICING_BASIS_OPTION[values.pricingBasis].hint}
+                {basisOptions.length === 1 && ` ${values.resourceType} is only charged this way.`}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
             <label htmlFor="location" className={LABEL_BASE}>Storage / Pickup Location</label>
             <input
               id="location"
@@ -171,7 +201,7 @@ export default function ResourceForm({
               id="unit"
               name="unit"
               type="text"
-              placeholder="e.g. units, pieces, sets, hours"
+              placeholder="e.g. chairs, plates, sets, buses"
               value={values.unit}
               disabled={isSubmitting}
               onChange={(e) => handleChange("unit", e.target.value)}
@@ -251,7 +281,9 @@ export default function ResourceForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="rentAmount" className={LABEL_BASE}>Daily Rental Price (₹ INR) *</label>
+            <label htmlFor="rentAmount" className={LABEL_BASE}>
+              {rateUnit ? `Rent per ${rateUnit} (₹ INR) *` : "Rent (₹ INR) *"}
+            </label>
             <div className="relative">
               <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
               <input
@@ -265,11 +297,19 @@ export default function ResourceForm({
                 disabled={isSubmitting}
                 onChange={(e) => handleChange("rentAmount", parseFloat(e.target.value) || 0)}
                 onBlur={() => handleBlur("rentAmount")}
-                className={cn(INPUT_BASE, "pl-8", touched.rentAmount && errors.rentAmount && INPUT_ERROR)}
+                className={cn(INPUT_BASE, "pl-8", rateUnit && "pr-20", touched.rentAmount && errors.rentAmount && INPUT_ERROR)}
               />
+              {rateUnit && (
+                <span className="absolute right-3.5 top-2.5 text-xs text-stone-400 font-medium">/ {rateUnit}</span>
+              )}
             </div>
             {touched.rentAmount && errors.rentAmount && <p className={ERROR_BASE}>{errors.rentAmount}</p>}
-            <p className="text-[11px] text-stone-400 mt-1">Per day or billing cycle per unit.</p>
+            <p className="text-[11px] text-stone-400 mt-1">
+              {values.pricingBasis === "HOUR" && `Charged for every hour booked on each day${values.quantity > 1 ? `, per ${values.unit || "unit"}` : ""}.`}
+              {values.pricingBasis === "DAY" && `Charged for every booked day${values.quantity > 1 ? `, per ${values.unit || "unit"}` : ""}.`}
+              {values.pricingBasis === "EVENT" && `One flat price per booking${values.quantity > 1 ? `, per ${values.unit || "unit"}` : ""}, however many days it covers.`}
+              {!values.pricingBasis && "Select a category and how it's charged first."}
+            </p>
           </div>
 
           <div>

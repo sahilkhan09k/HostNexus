@@ -20,6 +20,7 @@ describe("useResourceForm", () => {
       unit: "",
       location: "",
       isActive: true,
+      pricingBasis: "",
       rentAmount: 0,
       securityDeposit: 0,
       photos: [],
@@ -195,6 +196,7 @@ describe("useResourceForm", () => {
       unit: "",
       location: "",
       isActive: true,
+      pricingBasis: "",
       rentAmount: 0,
       securityDeposit: 0,
       photos: [],
@@ -208,5 +210,28 @@ describe("useResourceForm", () => {
     expect(result.current.touched).toEqual({});
     expect(result.current.submitError).toBeNull();
     expect(result.current.isDirty).toBe(false);
+  });
+
+  // ── Pricing basis follows the category ────────────────────────────────────
+
+  it("picking a category selects its default pricing basis", () => {
+    const { result } = renderHook(() => useResourceForm());
+    act(() => result.current.handleChange("resourceType", "Crockery/Cutlery"));
+    expect(result.current.values.pricingBasis).toBe("EVENT");
+  });
+
+  it("keeps the chosen basis when the new category allows it, resets it when not", () => {
+    const { result } = renderHook(() => useResourceForm());
+    act(() => result.current.handleChange("resourceType", "Staff/Manpower"));
+    act(() => result.current.handleChange("pricingBasis", "HOUR"));
+
+    act(() => result.current.handleChange("resourceType", "Banquet Hall")); // hour or day
+    expect(result.current.values.pricingBasis).toBe("HOUR");
+
+    act(() => result.current.handleChange("resourceType", "Cold Storage")); // day only
+    expect(result.current.values.pricingBasis).toBe("DAY");
+
+    act(() => result.current.handleChange("resourceType", ""));
+    expect(result.current.values.pricingBasis).toBe("");
   });
 });

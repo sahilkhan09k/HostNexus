@@ -183,6 +183,10 @@ model Resource {
   deletedAt    DateTime? // soft delete — resources with booking history are never hard-deleted
 
   // Commercial terms & Chain of custody pre-existing conditions (paise: 1 INR = 100 paise)
+  // rentAmountPaise is the price of one pricingBasis unit per unit of quantity:
+  // HOUR (per hour on each booked day) | DAY (per booked day) | EVENT (flat per booking).
+  // Allowed bases depend on resourceType (src/services/pricing.ts).
+  pricingBasis         String   @default("DAY")
   rentAmountPaise      Int      @default(0)
   securityDepositPaise Int      @default(0)
   photos               String[] @default([])
@@ -248,6 +252,11 @@ model BookingRequest {
 
   // Legacy status string bridge
   status String @default("pending")
+
+  // Pricing snapshot from the listing at request time (see Resource.pricingBasis).
+  // hoursPerDay is set only for HOUR bookings: hours needed on each booked day.
+  pricingBasis String @default("DAY")
+  hoursPerDay  Int?
 
   // Money in integer paise (₹1 = 100 paise)
   rentAmountPaise      Int @default(0)

@@ -21,6 +21,15 @@ import {
 import { cn } from "@/lib/utils";
 import { RESOURCE_TYPES } from "@/schemas/resource.schema";
 import { AuthService } from "@/lib/auth";
+import {
+  allowedPricingBases,
+  defaultPricingBasis,
+  isPricingBasisAllowed,
+  PRICING_BASIS_OPTION,
+  PRICING_BASIS_UNIT,
+  toPricingBasis,
+  type PricingBasis,
+} from "@/lib/pricing";
 import { ImageUploader } from "@/components/ui/image-uploader";
 import AvailabilityManager from "@/components/ui/availability-manager";
 
@@ -54,6 +63,7 @@ export default function EditResourcePage() {
   const [isActive, setIsActive] = useState(true);
 
   // Commercial & Chain of custody fields
+  const [pricingBasis, setPricingBasis] = useState<PricingBasis>("DAY");
   const [rentAmount, setRentAmount] = useState(0);
   const [securityDeposit, setSecurityDeposit] = useState(0);
   const [photos, setPhotos] = useState<string[]>([]);
@@ -93,6 +103,7 @@ export default function EditResourcePage() {
         setStatus(found.status || "available");
         setIsActive(found.isActive !== undefined ? found.isActive : true);
 
+        setPricingBasis(toPricingBasis(found.pricingBasis));
         setRentAmount((found.rentAmountPaise || 0) / 100);
         setSecurityDeposit((found.securityDepositPaise || 0) / 100);
         setPhotos(found.photos || []);
@@ -139,6 +150,7 @@ export default function EditResourcePage() {
         location: location.trim() || undefined,
         status,
         isActive,
+        pricingBasis,
         rentAmountPaise: Math.round(Number(rentAmount) * 100),
         securityDepositPaise: Math.round(Number(securityDeposit) * 100),
         photos,
@@ -253,7 +265,12 @@ export default function EditResourcePage() {
               <label className={LABEL_BASE}>Category *</label>
               <select
                 value={resourceType}
-                onChange={(e) => setResourceType(e.target.value)}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  setResourceType(type);
+                  // A new category may not allow the current basis: fall back to its default
+                  if (!isPricingBasisAllowed(type, pricingBasis)) setPricingBasis(defaultPricingBasis(type));
+                }}
                 className={INPUT_BASE}
                 required
               >
@@ -261,6 +278,24 @@ export default function EditResourcePage() {
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label htmlFor="pricingBasis" className={LABEL_BASE}>Charged *</label>
+              <select
+                id="pricingBasis"
+                value={pricingBasis}
+                onChange={(e) => setPricingBasis(e.target.value as PricingBasis)}
+                className={INPUT_BASE}
+                required
+              >
+                {allowedPricingBases(resourceType).map((basis) => (
+                  <option key={basis} value={basis}>{PRICING_BASIS_OPTION[basis].label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-stone-400 mt-1">
+                {PRICING_BASIS_OPTION[pricingBasis].hint} Changing it only affects new bookings.
+              </p>
             </div>
 
             <div>
@@ -341,7 +376,7 @@ export default function EditResourcePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className={LABEL_BASE}>Daily Rental Price (₹ INR) *</label>
+              <label className={LABEL_BASE}>Rent per {PRICING_BASIS_UNIT[pricingBasis]} (₹ INR) *</label>
               <div className="relative">
                 <span className="absolute left-3.5 top-2.5 text-stone-400 font-medium">₹</span>
                 <input
@@ -349,8 +384,9 @@ export default function EditResourcePage() {
                   min="0"
                   value={rentAmount || ""}
                   onChange={(e) => setRentAmount(parseFloat(e.target.value) || 0)}
-                  className={cn(INPUT_BASE, "pl-8")}
+                  className={cn(INPUT_BASE, "pl-8 pr-20")}
                 />
+                <span className="absolute right-3.5 top-2.5 text-xs text-stone-400 font-medium">/ {PRICING_BASIS_UNIT[pricingBasis]}</span>
               </div>
             </div>
 

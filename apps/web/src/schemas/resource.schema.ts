@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PRICING_BASES, isPricingBasisAllowed } from "@/lib/pricing";
 
 /**
  * Valid resource type categories for the HostNexus marketplace.
@@ -59,6 +60,11 @@ export const resourceFormSchema = z
 
     isActive: z.boolean().default(true),
 
+    // How the rent is charged — which bases are offered depends on the category
+    pricingBasis: z.enum(PRICING_BASES, {
+      errorMap: () => ({ message: "Choose how this listing is charged" }),
+    }),
+
     // Commercial Terms (INR entered in ₹, converted to paise on submission)
     rentAmount: z
       .number({
@@ -90,6 +96,13 @@ export const resourceFormSchema = z
       .min(0, "Transport rate cannot be negative")
       .default(0),
   })
+  .refine(
+    (data) => isPricingBasisAllowed(data.resourceType, data.pricingBasis),
+    {
+      message: "This category can't be charged that way — pick one of the listed options",
+      path: ["pricingBasis"],
+    }
+  )
   .refine(
     (data) => !data.transportAvailable || data.transportRatePerKm > 0,
     {

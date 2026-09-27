@@ -61,6 +61,10 @@ import {
 } from "@/lib/api-client";
 import type { BookingRequestWithDetails, ClaimType, DisputeReason, PaymentTransaction } from "@hostnexus/types";
 import { mediaUrl } from "@/lib/media";
+import { billableUnits, PRICING_BASIS_UNIT, toPricingBasis } from "@/lib/pricing";
+
+/** "hour" | "day" | "event" — what one unit of this booking's rent and offers buys */
+const rateUnitOf = (b: { pricingBasis?: string | null }) => PRICING_BASIS_UNIT[toPricingBasis(b.pricingBasis)];
 
 const inr = (paise: number | null | undefined) => `₹${((paise ?? 0) / 100).toLocaleString("en-IN")}`;
 
@@ -393,7 +397,7 @@ function BookingsPageContent() {
     setActionLoading(b.id);
     try {
       await payForBooking(b.id, {
-        description: `${b.resource.name} · ${b.totalDays ?? 1} day(s) · rent + deposit${b.transportFeePaise > 0 ? " + transport" : ""}`,
+        description: `${b.resource.name} · ${b.totalDays ?? 1} day(s)${b.pricingBasis === "HOUR" ? ` × ${b.hoursPerDay ?? 1}h` : ""} · rent + deposit${b.transportFeePaise > 0 ? " + transport" : ""}`,
         prefill: { name: user?.ownerName ?? undefined, email: user?.email, contact: user?.phone ?? undefined },
       });
       await fetchBookings();
@@ -844,7 +848,7 @@ function BookingsPageContent() {
                     </p>
                     <p className="text-stone-500 flex items-center gap-1">
                       <Calendar className="w-3 h-3 text-stone-400" />
-                      {new Date(b.startDate).toLocaleDateString()} &rarr; {new Date(b.endDate).toLocaleDateString()} ({days}d)
+                      {new Date(b.startDate).toLocaleDateString()} &rarr; {new Date(b.endDate).toLocaleDateString()} ({days}d{b.pricingBasis === "HOUR" ? ` × ${b.hoursPerDay ?? 1}h/day` : ""})
                     </p>
                   </div>
 
@@ -854,7 +858,7 @@ function BookingsPageContent() {
                       Total: ₹{totalINR.toLocaleString()}
                     </div>
                     <p className="text-[11px] text-stone-500">
-                      Rent: ₹{rentINR.toLocaleString()} + Deposit: ₹{depositINR.toLocaleString()}
+                      Rent: ₹{rentINR.toLocaleString()}{b.pricingBasis === "EVENT" ? " (flat per event)" : ""} + Deposit: ₹{depositINR.toLocaleString()}
                       {b.transportMode === "PROVIDER" && <> + Transport: ₹{transportINR.toLocaleString()}</>}
                     </p>
                     <p className="text-[11px] text-stone-500">
@@ -1553,7 +1557,7 @@ function BookingsPageContent() {
                                   </span>
                                 </div>
                                 <span className="text-base font-bold text-stone-900">
-                                  ₹{(offer.offeredAmountPaise / 100).toLocaleString()}<span className="text-xs text-stone-500 font-normal">/day</span>
+                                  ₹{(offer.offeredAmountPaise / 100).toLocaleString()}<span className="text-xs text-stone-500 font-normal">/{rateUnitOf(selectedBooking)}</span>
                                 </span>
                               </div>
 
@@ -1597,7 +1601,7 @@ function BookingsPageContent() {
                                     disabled={actionLoading === "negotiate-accept"}
                                     className="px-4 py-2 rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs disabled:opacity-50"
                                   >
-                                    ✓ Accept Offer (₹{(pendingOffer.offeredAmountPaise / 100).toLocaleString()}/day)
+                                    ✓ Accept Offer (₹{(pendingOffer.offeredAmountPaise / 100).toLocaleString()}/{rateUnitOf(selectedBooking)})
                                   </button>
                                   <button
                                     type="button"
@@ -2197,24 +2201,24 @@ function BookingsPageContent() {
               <h3 className="text-base font-bold text-stone-900">Make Counter-Offer</h3>
             </div>
             <p className="text-xs text-stone-500">
-              Propose a new daily rental rate for <strong>{selectedBooking.resource.name}</strong>.
+              Propose a new rate per {rateUnitOf(selectedBooking)} for <strong>{selectedBooking.resource.name}</strong>.
             </p>
 
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-xs space-y-1">
               <div className="flex justify-between text-stone-600">
                 <span>Listed Price:</span>
-                <span className="font-semibold">₹{((selectedBooking.rentAmountPaise ?? 0) / (selectedBooking.totalDays || 1) / 100).toLocaleString()}/day</span>
+                <span className="font-semibold">₹{((selectedBooking.rentAmountPaise ?? 0) / (billableUnits(selectedBooking.pricingBasis, selectedBooking.totalDays || 1, selectedBooking.hoursPerDay) * (selectedBooking.quantity || 1)) / 100).toLocaleString()}/{rateUnitOf(selectedBooking)}</span>
               </div>
               {selectedBooking.negotiation?.offers && selectedBooking.negotiation.offers.length > 0 && (
                 <div className="flex justify-between text-amber-700 font-medium">
                   <span>Last Offer:</span>
-                  <span>₹{(selectedBooking.negotiation.offers[selectedBooking.negotiation.offers.length - 1].offeredAmountPaise / 100).toLocaleString()}/day</span>
+                  <span>₹{(selectedBooking.negotiation.offers[selectedBooking.negotiation.offers.length - 1].offeredAmountPaise / 100).toLocaleString()}/{rateUnitOf(selectedBooking)}</span>
                 </div>
               )}
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">Your Counter-Offer (₹/day) *</label>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">Your Counter-Offer (₹/{rateUnitOf(selectedBooking)}) *</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm font-medium">₹</span>
                 <input

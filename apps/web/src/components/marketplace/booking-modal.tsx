@@ -12,6 +12,7 @@ import {
 import { createBookingRequest, makeNegotiationOffer } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { MAX_HOURS_PER_DAY, PRICING_BASIS_UNIT, rentBreakdown, rentFor, toPricingBasis } from "@/lib/pricing";
 
 /** "YYYY-MM-DD" for the user's local calendar day (toISOString would give the UTC day). */
 function localIsoDate(d: Date) {
@@ -27,6 +28,8 @@ interface BookingModalProps {
     resourceType: string;
     location: string | null;
     rentAmountPaise?: number;
+    /** HOUR | DAY | EVENT — what rentAmountPaise buys (missing = per day) */
+    pricingBasis?: string;
     securityDepositPaise?: number;
     quantity: number;
     photos?: string[];
@@ -55,6 +58,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   const [startDate, setStartDate] = useState(localIsoDate(tomorrow));
   const [endDate, setEndDate]     = useState(localIsoDate(dayAfter));
   const [quantity, setQuantity]   = useState(1);
+  // Hourly listings: hours needed on each booked day
+  const [hoursPerDay, setHoursPerDay] = useState(4);
   const [specialRequests, setSpecialRequests] = useState("");
   const [acknowledgedInspection, setAcknowledgedInspection] = useState(false);
 
@@ -63,7 +68,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   const [distanceKm, setDistanceKm]       = useState<number>(0);
 
   // Negotiate-tab fields
-  const [offerPerDayINR, setOfferPerDayINR] = useState<number>(
+  const [offerRateINR, setOfferRateINR] = useState<number>(
     Math.round((resource.rentAmountPaise ?? 0) / 100 * 0.9) || 0
   );
   const [offerMessage, setOfferMessage] = useState("");
@@ -80,9 +85,14 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
   // Both dates are inclusive: the 3rd to the 3rd is a one-day rental
   const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
 
-  const listedDailyINR  = (resource.rentAmountPaise ?? 0) / 100;
+  // The listed rent is per unit per hour / day / event, as the owner chose
+  const basis           = toPricingBasis(resource.pricingBasis);
+  const rateUnit        = PRICING_BASIS_UNIT[basis];
+  const hourly          = basis === "HOUR";
+  const hours           = hourly ? hoursPerDay : null;
+  const listedRateINR   = (resource.rentAmountPaise ?? 0) / 100;
   const depositINR      = (resource.securityDepositPaise ?? 0) / 100;
-  const totalRentINR    = listedDailyINR * diffDays * quantity;
+  const totalRentINR    = rentFor(listedRateINR, basis, diffDays, hours, quantity);
 
   const transportOffered    = Boolean(resource.transportAvailable) && (resource.transportRatePerKmPaise ?? 0) > 0;
   const usingOwnerTransport = transportOffered && transportMode === "PROVIDER";
@@ -93,10 +103,10 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
     : 0;
   const totalEscrowINR  = totalRentINR + depositINR + transportFeeINR;
 
-  const offerTotalRentINR   = offerPerDayINR * diffDays * quantity;
+  const offerTotalRentINR   = rentFor(offerRateINR, basis, diffDays, hours, quantity);
   const offerTotalEscrowINR = offerTotalRentINR + depositINR + transportFeeINR;
   const savingINR           = totalRentINR - offerTotalRentINR;
-  const savingPct           = listedDailyINR > 0
+  const savingPct           = listedRateINR > 0
     ? Math.round((savingINR / totalRentINR) * 100)
     : 0;
 
@@ -111,6 +121,10 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       setErrorMessage("Enter the distance in km to use the owner's transport.");
       return;
     }
+    if (hourly && !(hoursPerDay >= 1 && hoursPerDay <= MAX_HOURS_PER_DAY)) {
+      setErrorMessage(`Enter the hours you need each day (1–${MAX_HOURS_PER_DAY}).`);
+      return;
+    }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
@@ -120,6 +134,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
         startDate,       // calendar days ("YYYY-MM-DD"), inclusive
         endDate,
         specialRequests: specialRequests.trim() || undefined,
+        hoursPerDay:     hourly ? hoursPerDay : undefined,
         transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
         transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
       });
@@ -139,12 +154,16 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       setErrorMessage("Please acknowledge the inspection policy before negotiating.");
       return;
     }
-    if (offerPerDayINR <= 0) {
+    if (offerRateINR <= 0) {
       setErrorMessage("Please enter a valid offer amount.");
       return;
     }
     if (usingOwnerTransport && !(distanceKm > 0)) {
       setErrorMessage("Enter the distance in km to use the owner's transport.");
+      return;
+    }
+    if (hourly && !(hoursPerDay >= 1 && hoursPerDay <= MAX_HOURS_PER_DAY)) {
+      setErrorMessage(`Enter the hours you need each day (1–${MAX_HOURS_PER_DAY}).`);
       return;
     }
     setIsSubmitting(true);
@@ -157,14 +176,15 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
         startDate,       // calendar days ("YYYY-MM-DD"), inclusive
         endDate,
         specialRequests: specialRequests.trim() || undefined,
+        hoursPerDay:     hourly ? hoursPerDay : undefined,
         transportMode:       usingOwnerTransport ? "PROVIDER" : "SELF",
         transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
       });
 
-      // 2. Immediately open a negotiation with the proposed daily rate
+      // 2. Immediately open a negotiation with the proposed rate (same basis as the listing)
       await makeNegotiationOffer(
         booking.id,
-        Math.round(offerPerDayINR * 100),
+        Math.round(offerRateINR * 100),
         offerMessage.trim() || undefined
       );
 
@@ -179,7 +199,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
 
   // ── Shared date + quantity row ────────────────────────────────
   const DateQuantityRow = () => (
-    <div className="grid grid-cols-3 gap-3">
+    <div className={cn("grid gap-3", hourly ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
       <div>
         <label className="block text-xs font-semibold uppercase text-stone-600 mb-1">Start Date</label>
         <input type="date" value={startDate} min={localIsoDate(new Date())}
@@ -201,6 +221,14 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
           onChange={e => setQuantity(parseInt(e.target.value, 10) || 1)}
           className="w-full rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500" required />
       </div>
+      {hourly && (
+        <div>
+          <label htmlFor="hoursPerDay" className="block text-xs font-semibold uppercase text-stone-600 mb-1">Hours / day</label>
+          <input id="hoursPerDay" type="number" min="1" max={MAX_HOURS_PER_DAY} step="1" value={hoursPerDay || ""}
+            onChange={e => setHoursPerDay(Math.min(MAX_HOURS_PER_DAY, parseInt(e.target.value, 10) || 0))}
+            className="w-full rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500" required />
+        </div>
+      )}
     </div>
   );
 
@@ -406,7 +434,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                   <p className="mt-1 text-xs font-semibold text-stone-800">
                     Listed:{" "}
                     <span className="text-emerald-700">
-                      ₹{listedDailyINR.toLocaleString()}/day
+                      ₹{listedRateINR.toLocaleString()}/{rateUnit}
                     </span>
                     {depositINR > 0 && (
                       <span className="ml-2 text-stone-400">+ ₹{depositINR.toLocaleString()} deposit</span>
@@ -448,7 +476,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                   {/* Escrow summary */}
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2 text-xs">
                     <div className="flex justify-between text-stone-600">
-                      <span>Rental ({diffDays}d × ₹{listedDailyINR.toLocaleString()} × {quantity} unit):</span>
+                      <span>Rental ({rentBreakdown(basis, diffDays, hours, listedRateINR)} × {quantity} unit{quantity === 1 ? "" : "s"}):</span>
                       <span className="font-semibold text-stone-800">₹{totalRentINR.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-emerald-700 font-medium">
@@ -508,26 +536,26 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs font-semibold uppercase text-stone-600 mb-1">
-                          Your Offer (₹ / day) *
+                          Your Offer (₹ / {rateUnit}) *
                         </label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm font-medium">₹</span>
                           <input
                             type="number" min="1" required
-                            value={offerPerDayINR || ""}
-                            onChange={e => setOfferPerDayINR(parseFloat(e.target.value) || 0)}
-                            placeholder={String(Math.round(listedDailyINR * 0.85))}
+                            value={offerRateINR || ""}
+                            onChange={e => setOfferRateINR(parseFloat(e.target.value) || 0)}
+                            placeholder={String(Math.round(listedRateINR * 0.85))}
                             className="w-full rounded-xl border border-amber-300 bg-white pl-7 pr-3 py-2.5 text-sm font-bold text-stone-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-all"
                           />
                         </div>
                         <p className="mt-1 text-[10px] text-stone-400">
-                          Listed: ₹{listedDailyINR.toLocaleString()}/day
+                          Listed: ₹{listedRateINR.toLocaleString()}/{rateUnit}
                         </p>
                       </div>
                       <div className="rounded-xl border border-stone-200 bg-white p-3 space-y-1.5 text-xs">
                         <p className="font-semibold text-stone-700">Your offer summary</p>
                         <div className="flex justify-between text-stone-600">
-                          <span>Rent ({diffDays}d × ₹{offerPerDayINR.toLocaleString()}):</span>
+                          <span>Rent ({rentBreakdown(basis, diffDays, hours, offerRateINR)} × {quantity}):</span>
                           <span className="font-semibold">₹{offerTotalRentINR.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between text-stone-600">
@@ -584,7 +612,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                       className="rounded-xl border border-stone-200 px-4 py-2.5 text-xs font-semibold text-stone-600 hover:bg-stone-50">
                       Cancel
                     </button>
-                    <button type="submit" disabled={isSubmitting || !acknowledgedInspection || offerPerDayINR <= 0}
+                    <button type="submit" disabled={isSubmitting || !acknowledgedInspection || offerRateINR <= 0}
                       className="flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors disabled:opacity-50">
                       {isSubmitting
                         ? <Loader2 className="w-4 h-4 animate-spin" />

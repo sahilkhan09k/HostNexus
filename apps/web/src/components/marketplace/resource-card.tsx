@@ -7,6 +7,7 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { PRICING_BASIS_UNIT, toPricingBasis } from "@/lib/pricing";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
@@ -30,6 +31,8 @@ export interface ResourceCardData {
   imageBg: string;
   // Commercial & Chain of custody fields
   rentAmountPaise?: number;
+  /** HOUR | DAY | EVENT — what rentAmountPaise buys (missing = per day) */
+  pricingBasis?: string;
   securityDepositPaise?: number;
   photos?: string[];
   hasPreExistingDamage?: boolean;
@@ -175,7 +178,7 @@ export function ResourceCard({ data, index = 0, onBook, onViewDetails }: Resourc
               {data.rentAmountPaise !== undefined
                 ? `₹${(data.rentAmountPaise / 100).toLocaleString()}`
                 : data.price}
-              <span className="text-[11px] font-normal text-stone-500"> / day</span>
+              <span className="text-[11px] font-normal text-stone-500"> / {PRICING_BASIS_UNIT[toPricingBasis(data.pricingBasis)]}</span>
             </div>
             {data.securityDepositPaise !== undefined && data.securityDepositPaise > 0 && (
               <div className="text-[10px] font-medium text-emerald-700">

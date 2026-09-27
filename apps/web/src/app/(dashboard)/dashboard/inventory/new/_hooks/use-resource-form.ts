@@ -5,6 +5,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useState } from "react";
 import { resourceFormSchema } from "@/schemas/resource.schema";
 import { AuthService } from "@/lib/auth";
+import { defaultPricingBasis, isPricingBasisAllowed, type PricingBasis } from "@/lib/pricing";
 
 export interface FormValues {
   name: string;
@@ -14,6 +15,7 @@ export interface FormValues {
   unit: string;
   location: string;
   isActive: boolean;
+  pricingBasis: PricingBasis | "";
   rentAmount: number;
   securityDeposit: number;
   photos: string[];
@@ -32,6 +34,7 @@ export interface FormErrors {
   unit?: string;
   location?: string;
   isActive?: string;
+  pricingBasis?: string;
   rentAmount?: string;
   securityDeposit?: string;
   photos?: string;
@@ -54,6 +57,7 @@ const DEFAULT_VALUES: FormValues = {
   unit: "",
   location: "",
   isActive: true,
+  pricingBasis: "",
   rentAmount: 0,
   securityDeposit: 0,
   photos: [],
@@ -129,7 +133,16 @@ export function useResourceForm(
     field: keyof FormValues,
     value: FormValues[keyof FormValues]
   ): void => {
-    setValues((prev) => ({ ...prev, [field]: value }));
+    setValues((prev) => {
+      const next = { ...prev, [field]: value };
+      // A new category may not allow the current pricing basis: fall back to its default
+      if (field === "resourceType") {
+        const type = String(value);
+        if (!type) next.pricingBasis = "";
+        else if (!isPricingBasisAllowed(type, prev.pricingBasis)) next.pricingBasis = defaultPricingBasis(type);
+      }
+      return next;
+    });
 
     const errorMessage = validateField(field, value);
     setErrors((prev) => {
@@ -170,6 +183,7 @@ export function useResourceForm(
       unit: true,
       location: true,
       isActive: true,
+      pricingBasis: true,
       rentAmount: true,
       securityDeposit: true,
       photos: true,
@@ -205,6 +219,7 @@ export function useResourceForm(
         location: values.location || undefined,
         isActive: values.isActive,
         status: "available",
+        pricingBasis: values.pricingBasis,
         rentAmountPaise: Math.round(Number(values.rentAmount) * 100),
         securityDepositPaise: Math.round(Number(values.securityDeposit) * 100),
         photos: values.photos,

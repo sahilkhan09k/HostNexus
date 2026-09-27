@@ -30,6 +30,7 @@ interface ApiResource {
   location: string | null;
   isActive: boolean;
   rentAmountPaise?: number;
+  pricingBasis?: string;
   securityDepositPaise?: number;
   photos?: string[];
   hasPreExistingDamage?: boolean;
@@ -84,6 +85,7 @@ function mapApiResource(r: ApiResource): ResourceCardData {
     tags: [r.resourceType],
     imageBg: style.imageBg,
     rentAmountPaise: r.rentAmountPaise,
+    pricingBasis: r.pricingBasis,
     securityDepositPaise: r.securityDepositPaise,
     photos: r.photos,
     hasPreExistingDamage: r.hasPreExistingDamage,
@@ -470,6 +472,7 @@ function MarketplaceContent() {
             resourceType:         selectedResource.category,
             location:             selectedResource.location,
             rentAmountPaise:      selectedResource.rentAmountPaise,
+            pricingBasis:         selectedResource.pricingBasis,
             securityDepositPaise: selectedResource.securityDepositPaise,
             quantity:             10,
             photos:               selectedResource.photos,

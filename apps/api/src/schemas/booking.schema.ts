@@ -16,6 +16,8 @@ export const createBookingRequestSchema = z.object({
   startDate:       calendarDate,
   endDate:         calendarDate,
   specialRequests: z.string().max(2000).optional(),
+  // Hourly listings only: hours needed on each booked day (required for them, ignored otherwise)
+  hoursPerDay:     z.number().int("Hours must be a whole number").min(1, "Book at least 1 hour").max(24, "A day has at most 24 hours").optional(),
   // SELF = renter arranges transport; PROVIDER = owner delivers at their per-km rate
   transportMode:       z.enum(["SELF", "PROVIDER"]).optional(), // omitted = SELF
   transportDistanceKm: z.number().positive("Distance must be greater than 0").max(5000, "Distance cannot exceed 5,000 km").optional(),

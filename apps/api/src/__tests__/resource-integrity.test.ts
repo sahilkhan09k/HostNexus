@@ -87,3 +87,19 @@ describe("lowering quantity (#22)", () => {
     await expect(ResourceService.updateResource("res-1", OWNER, { quantity: 120 } as any)).resolves.toMatchObject({ quantity: 120 });
   });
 });
+
+describe("pricing basis on update", () => {
+  it("rejects a basis the category doesn't allow, including after a category change", async () => {
+    db.__store.resource[0].resourceType = "Banquet Hall";
+    db.__store.resource[0].pricingBasis = "DAY";
+    await expect(ResourceService.updateResource("res-1", OWNER, { pricingBasis: "EVENT" } as any))
+      .rejects.toMatchObject({ statusCode: 422, code: "INVALID_PRICING_BASIS" });
+
+    db.__store.resource[0].pricingBasis = "EVENT";
+    db.__store.resource[0].resourceType = "Furniture";
+    await expect(ResourceService.updateResource("res-1", OWNER, { resourceType: "Banquet Hall" } as any))
+      .rejects.toMatchObject({ statusCode: 422, code: "INVALID_PRICING_BASIS" });
+    await expect(ResourceService.updateResource("res-1", OWNER, { resourceType: "Banquet Hall", pricingBasis: "HOUR" } as any))
+      .resolves.toMatchObject({ resourceType: "Banquet Hall", pricingBasis: "HOUR" });
+  });
+});

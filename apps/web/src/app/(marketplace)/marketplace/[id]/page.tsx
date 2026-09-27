@@ -18,6 +18,7 @@ import { BookingModal } from "@/components/marketplace/booking-modal";
 import { AuthService } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { PRICING_BASIS_OPTION, PRICING_BASIS_UNIT, toPricingBasis } from "@/lib/pricing";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -57,6 +58,7 @@ interface ResourceDetail {
   location: string | null;
   isActive: boolean;
   rentAmountPaise: number;
+  pricingBasis?: string; // HOUR | DAY | EVENT (missing = per day)
   securityDepositPaise: number;
   photos: string[];
   hasPreExistingDamage: boolean;
@@ -588,10 +590,12 @@ export default function ResourceDetailPage() {
                 {/* Pricing */}
                 <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2">
                   <div className="flex items-baseline justify-between">
-                    <span className="text-xs font-semibold uppercase text-stone-400">Daily Rent</span>
+                    <span className="text-xs font-semibold uppercase text-stone-400">
+                      Rent {PRICING_BASIS_OPTION[toPricingBasis(resource.pricingBasis)].label.toLowerCase()}
+                    </span>
                     <span className="text-2xl font-black text-stone-900">
                       ₹{(resource.rentAmountPaise / 100).toLocaleString()}
-                      <span className="text-xs font-normal text-stone-400"> / day</span>
+                      <span className="text-xs font-normal text-stone-400"> / {PRICING_BASIS_UNIT[toPricingBasis(resource.pricingBasis)]}</span>
                     </span>
                   </div>
                   <div className="flex items-baseline justify-between border-t border-stone-200 pt-2 text-xs">
@@ -679,6 +683,7 @@ export default function ResourceDetailPage() {
           resourceType:         resource.resourceType,
           location:             resource.location,
           rentAmountPaise:      resource.rentAmountPaise,
+          pricingBasis:         resource.pricingBasis,
           securityDepositPaise: resource.securityDepositPaise,
           quantity:             resource.quantity,
           photos:               resource.photos,

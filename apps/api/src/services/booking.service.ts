@@ -6,6 +6,7 @@ import { PaymentService } from "./payment.service.js";
 import { assertCapacity, lockResource } from "./capacity.js";
 import { resolveOwnedMedia } from "./evidence.js";
 import { notifyBookingEvent, type BookingEvent } from "./notifications/booking-notifications.js";
+import { describeBillablePeriod, PRICING_BASIS_UNIT, rentFor, toPricingBasis } from "./pricing.js";
 import {
   RENTER_INSPECTION_MS,
   OWNER_INSPECTION_MS,
@@ -500,8 +501,13 @@ export class BookingService {
     const transportRatePerKmPaise = useProviderTransport ? resource.transportRatePerKmPaise : 0;
     const transportFeePaise       = useProviderTransport ? Math.round(transportRatePerKmPaise * transportDistanceKm!) : 0;
 
-    // The listed rent is per unit per day (as the listing form states)
-    const rentAmountPaise      = resource.rentAmountPaise * totalDays * input.quantity;
+    // The listed rent is per unit per hour / day / event, as the owner chose on the listing
+    const pricingBasis = toPricingBasis(resource.pricingBasis);
+    if (pricingBasis === "HOUR" && input.hoursPerDay === undefined) {
+      throw unprocessable("This listing is charged per hour. Enter how many hours you need each day.", "HOURS_REQUIRED");
+    }
+    const hoursPerDay = pricingBasis === "HOUR" ? input.hoursPerDay! : null;
+    const rentAmountPaise      = rentFor(resource.rentAmountPaise, { pricingBasis, totalDays, hoursPerDay, quantity: input.quantity });
     const securityDepositPaise = resource.securityDepositPaise;
     const totalAmountPaise     = rentAmountPaise + securityDepositPaise + transportFeePaise;
 
@@ -525,6 +531,8 @@ export class BookingService {
           startDate,
           endDate,
           totalDays,
+          pricingBasis,
+          hoursPerDay,
           specialRequests: input.specialRequests || null,
           bookingStatus:   "BOOKING_REQUESTED",
           financialStatus: "PENDING_PAYMENT",
@@ -557,7 +565,7 @@ export class BookingService {
       await this.recordTimelineEvent(
         created.id, "BOOKING_CREATED", seekerBusiness.id, "RENTER",
         "Booking Requested",
-        `Requested by ${seekerBusiness.name} for ${totalDays} day(s). Rent: ${rupees(rentAmountPaise)}, Deposit: ${rupees(securityDepositPaise)}. ${
+        `Requested by ${seekerBusiness.name} for ${describeBillablePeriod(pricingBasis, totalDays, hoursPerDay)} at ${rupees(resource.rentAmountPaise)}/${PRICING_BASIS_UNIT[pricingBasis]}. Rent: ${rupees(rentAmountPaise)}, Deposit: ${rupees(securityDepositPaise)}. ${
           useProviderTransport
             ? `Owner transport: ${transportDistanceKm} km × ${rupees(transportRatePerKmPaise)}/km = ${rupees(transportFeePaise)}.`
             : "Renter arranges own transport."
@@ -713,13 +721,13 @@ export class BookingService {
 
   /**
    * Accept a request under the resource lock (capacity) and the booking lock.
-   * Shared with the negotiation flow; `agreedDailyRatePaise` re-prices the rent.
+   * Shared with the negotiation flow; `agreedRatePaise` re-prices the rent.
    */
   static async acceptBooking(
     bookingId: string,
     resourceId: string,
     actor: { id: string; name: string },
-    agreedDailyRatePaise: number | null,
+    agreedRatePaise: number | null,
     extra?: (tx: Tx, booking: BookingRequest) => Promise<void>
   ) {
     const updated = await prisma.$transaction(
@@ -739,15 +747,15 @@ export class BookingService {
 
         if (extra) await extra(tx, booking);
 
-        const priceData = agreedDailyRatePaise !== null
+        const priceData = agreedRatePaise !== null
           ? (() => {
-              // Offers are per unit per day, like the listed rent
-              const rent = agreedDailyRatePaise * (booking.totalDays ?? 1) * booking.quantity;
+              // Offers are per unit per hour / day / event, like the listed rent
+              const rent = rentFor(agreedRatePaise, booking);
               return {
                 rentAmountPaise:  rent,
                 totalAmountPaise: rent + booking.securityDepositPaise + booking.transportFeePaise,
-                proposedPrice:    agreedDailyRatePaise / 100,
-                finalPrice:       agreedDailyRatePaise / 100,
+                proposedPrice:    agreedRatePaise / 100,
+                finalPrice:       agreedRatePaise / 100,
               };
             })()
           : {};
@@ -767,7 +775,7 @@ export class BookingService {
         await this.recordTimelineEvent(
           bookingId, "BOOKING_ACCEPTED", actor.id, booking.providerId === actor.id ? "OWNER" : "RENTER",
           "Booking Accepted",
-          `${agreedDailyRatePaise !== null ? `Accepted at the negotiated rate of ${rupees(agreedDailyRatePaise)}/day.` : `${actor.name} accepted the booking request.`} The renter must pay ${rupees(result.totalAmountPaise)} into escrow by ${result.paymentDeadline!.toISOString()}.`,
+          `${agreedRatePaise !== null ? `Accepted at the negotiated rate of ${rupees(agreedRatePaise)}/${PRICING_BASIS_UNIT[toPricingBasis(booking.pricingBasis)]}.` : `${actor.name} accepted the booking request.`} The renter must pay ${rupees(result.totalAmountPaise)} into escrow by ${result.paymentDeadline!.toISOString()}.`,
           null, tx
         );
         return result;

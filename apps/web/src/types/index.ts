@@ -78,6 +78,8 @@ export interface Resource {
   location: string | null;
   isActive: boolean;
   
+  /** HOUR | DAY | EVENT — what one rentAmountPaise buys */
+  pricingBasis: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise: number;
   securityDepositPaise: number;
   photos: string[];
@@ -107,6 +109,7 @@ export interface CreateResourceInput {
   status?: ResourceStatus;
   location?: string;
   isActive?: boolean;
+  pricingBasis?: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise: number;
   securityDepositPaise: number;
   photos?: string[];
@@ -126,6 +129,7 @@ export interface UpdateResourceInput {
   status?: ResourceStatus;
   location?: string;
   isActive?: boolean;
+  pricingBasis?: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise?: number;
   securityDepositPaise?: number;
   photos?: string[];
@@ -315,6 +319,9 @@ export interface BookingRequest {
   startDate: string;
   endDate: string;
   totalDays: number | null;
+  /** Snapshot of the listing's pricing basis; hoursPerDay only for HOUR bookings */
+  pricingBasis: "HOUR" | "DAY" | "EVENT";
+  hoursPerDay: number | null;
   specialRequests: string | null;
   
   bookingStatus: BookingStatus;
@@ -410,6 +417,8 @@ export interface CreateBookingRequestInput {
   startDate: string;
   endDate: string;
   specialRequests?: string;
+  /** Required when the listing is charged per hour */
+  hoursPerDay?: number;
   transportMode?: "SELF" | "PROVIDER";
   transportDistanceKm?: number;
 }

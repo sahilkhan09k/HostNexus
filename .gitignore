@@ -142,5 +142,7 @@ package-lock.json
 # Hackathon decks and design handoff
 /HostNexus Design System-handoff.zip
 /HostNexus_HackCelestial3.0*.pptx
+# Office lock files (created while a deck/doc is open)
+~$*
 # Scratch scripts
 apps/api/rc.tmp.mjs

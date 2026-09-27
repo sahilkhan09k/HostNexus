@@ -96,6 +96,8 @@ export interface Resource {
   isActive: boolean;
   
   // Commercial terms & Pre-existing wear disclosure (paise integer: 1 INR = 100 paise)
+  /** HOUR | DAY | EVENT — what one rentAmountPaise buys */
+  pricingBasis: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise: number;
   securityDepositPaise: number;
   photos: string[];
@@ -125,6 +127,7 @@ export interface CreateResourceInput {
   status?: ResourceStatus;
   location?: string;
   isActive?: boolean;
+  pricingBasis?: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise: number;
   securityDepositPaise: number;
   photos?: string[];
@@ -144,6 +147,7 @@ export interface UpdateResourceInput {
   status?: ResourceStatus;
   location?: string;
   isActive?: boolean;
+  pricingBasis?: "HOUR" | "DAY" | "EVENT";
   rentAmountPaise?: number;
   securityDepositPaise?: number;
   photos?: string[];
@@ -345,6 +349,9 @@ export interface BookingRequest {
   startDate: string;
   endDate: string;
   totalDays: number | null;
+  /** Snapshot of the listing's pricing basis; hoursPerDay only for HOUR bookings */
+  pricingBasis: "HOUR" | "DAY" | "EVENT";
+  hoursPerDay: number | null;
   specialRequests: string | null;
   
   // Dual states
@@ -448,6 +455,8 @@ export interface CreateBookingRequestInput {
   startDate: string;
   endDate: string;
   specialRequests?: string;
+  /** Required when the listing is charged per hour */
+  hoursPerDay?: number;
   transportMode?: "SELF" | "PROVIDER";
   transportDistanceKm?: number;
 }

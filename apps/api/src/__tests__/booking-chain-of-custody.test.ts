@@ -200,6 +200,48 @@ describe("booking request dates (#19, #20)", () => {
   });
 });
 
+describe("pricing basis (per hour / day / event)", () => {
+  it("hourly listings charge rate × hours per day × days × quantity and snapshot the basis", async () => {
+    seed({ pricingBasis: "HOUR", quantity: 2 });
+    const id = await request({ quantity: 2, hoursPerDay: 5 }); // 3rd–5th = 3 days
+    const b = booking(id);
+    expect(b.pricingBasis).toBe("HOUR");
+    expect(b.hoursPerDay).toBe(5);
+    expect(b.rentAmountPaise).toBe(RENT_PER_DAY * 5 * 3 * 2);
+    expect(b.totalAmountPaise).toBe(RENT_PER_DAY * 5 * 3 * 2 + DEPOSIT);
+  });
+
+  it("hourly listings require the hours per day", async () => {
+    seed({ pricingBasis: "HOUR" });
+    await expect(request()).rejects.toMatchObject({ statusCode: 422, code: "HOURS_REQUIRED" });
+  });
+
+  it("per-event listings charge a flat rate per unit, however many days", async () => {
+    seed({ pricingBasis: "EVENT", quantity: 10 });
+    const id = await request({ quantity: 4, hoursPerDay: 6 }); // hours are ignored for non-hourly listings
+    const b = booking(id);
+    expect(b.pricingBasis).toBe("EVENT");
+    expect(b.hoursPerDay).toBeNull();
+    expect(b.rentAmountPaise).toBe(RENT_PER_DAY * 4);
+  });
+
+  it("a negotiated rate uses the booking's basis", async () => {
+    seed({ pricingBasis: "HOUR" });
+    const id = await request({ hoursPerDay: 4 });
+    await NegotiationService.makeOffer(RENTER, id, 150_000);
+    await NegotiationService.acceptOffer(OWNER, id);
+    expect(booking(id).rentAmountPaise).toBe(150_000 * 4 * 3);
+    expect(booking(id).totalAmountPaise).toBe(150_000 * 4 * 3 + DEPOSIT);
+  });
+
+  it("the owner changing the basis later doesn't re-price an existing request", async () => {
+    const id = await request();
+    db.__store.resource[0].pricingBasis = "EVENT";
+    await accept(id);
+    expect(booking(id).rentAmountPaise).toBe(3 * RENT_PER_DAY);
+  });
+});
+
 describe("hidden and suspended listings (#8, #17)", () => {
   it("cannot book a soft-deleted listing", async () => {
     db.__store.resource[0].deletedAt = new Date();
