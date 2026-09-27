@@ -4,6 +4,8 @@
 // never collide.
 // ─────────────────────────────────────────────────────────────
 
+import type { AdminDecision, BookingRequestWithDetails, DamageClaim, Dispute, PaymentTransaction } from "@hostnexus/types";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const ADMIN_TOKEN_KEY = "hostnexus_admin_token";
 const ADMIN_KEY = "hostnexus_admin";
@@ -23,7 +25,7 @@ export interface PendingUser {
   email: string;
   ownerName: string | null;
   phone: string | null;
-  verificationStatus: "PENDING" | "VERIFIED" | "REJECTED";
+  verificationStatus: "PENDING" | "VERIFIED" | "REJECTED" | "SUSPENDED";
   verificationNotes: string | null;
   gstCertificateUrl: string | null;
   aadhaarUrl: string | null;
@@ -32,6 +34,8 @@ export interface PendingUser {
   gstLegalName?: string | null;
   gstTradeName?: string | null;
   createdAt: string;
+  /** Bookings not yet completed or cancelled, on either side */
+  openBookings: number;
   businesses: {
     id: string;
     name: string;
@@ -47,27 +51,32 @@ export interface AdminSummary {
   pending: number;
   verified: number;
   rejected: number;
+  suspended: number;
   totalResources: number;
   totalBookings: number;
-  openDisputes?: number;
+  openDisputes: number;
+  pendingPayouts: number;
+  failedRefunds: number;
 }
 
-export interface DisputedBooking {
-  id: string;
-  startDate: string;
-  endDate: string;
-  securityDepositPaise: number;
-  totalAmountPaise: number;
-  financialStatus: string;
-  resource: { id: string; name: string; resourceType: string };
-  seeker: { id: string; name: string };
-  provider: { id: string; name: string };
-  damageClaims: { id: string; claimType: string; description: string; claimedAmountPaise: number; claimantId: string }[];
-  disputes: { id: string; status: string; renterReason: string | null; renterResponse: string | null }[];
-  evidence: { id: string; stage: string; fileUrl: string; notes: string | null }[];
+/** A dispute with the full booking it belongs to (evidence, inspections, ledger, timeline). */
+export interface AdminDispute extends Dispute {
+  damageClaim: DamageClaim | null;
+  booking: BookingRequestWithDetails;
 }
 
-export type DisputeDecision = "REFUND_RENTER" | "PAY_OWNER" | "PARTIAL_SETTLEMENT" | "REJECT_CLAIM";
+export interface AdminTransaction extends PaymentTransaction {
+  booking: {
+    id: string;
+    startDate: string;
+    endDate: string;
+    resource: { name: string };
+    seeker: { id: string; name: string };
+    provider: { id: string; name: string };
+  };
+}
+
+
 
 export class AdminAuthService {
   static getToken(): string | null {
@@ -193,18 +202,56 @@ export class AdminAuthService {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  static async getDisputes(): Promise<DisputedBooking[]> {
-    const body = await this.fetch<{ success: boolean; data: { bookings: DisputedBooking[] } }>("/api/admin/disputes");
-    return body.data.bookings;
+  static async suspendUser(id: string, reason: string): Promise<void> {
+    await this.fetch(`/api/admin/users/${id}/suspend`, {
+      method: "PATCH",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  static async reinstateUser(id: string): Promise<void> {
+    await this.fetch(`/api/admin/users/${id}/reinstate`, { method: "PATCH" });
+  }
+
+  // ── Dispute console ──
+
+  static async getDisputes(status: "OPEN" | "ESCALATED" | "RESOLVED" | "ALL" = "ALL"): Promise<AdminDispute[]> {
+    const body = await this.fetch<{ success: boolean; data: { disputes: AdminDispute[] } }>(
+      `/api/admin/disputes?status=${status}`
+    );
+    return body.data.disputes;
   }
 
   static async resolveDispute(
     bookingId: string,
-    input: { decision: DisputeDecision; resolutionAmountPaise?: number; resolutionNotes: string }
+    input: { decision: AdminDecision; resolutionAmountPaise?: number; resolutionNotes: string }
   ): Promise<void> {
-    await this.fetch(`/api/admin/bookings/${bookingId}/resolve-dispute`, {
+    await this.fetch(`/api/admin/disputes/${bookingId}/resolve`, {
       method: "POST",
       body: JSON.stringify(input),
     });
+  }
+
+  // ── Escrow ledger: owner payouts & renter refunds ──
+
+  static async getTransactions(filter: { direction?: "TO_OWNER" | "TO_RENTER"; status?: string } = {}): Promise<AdminTransaction[]> {
+    const qs = new URLSearchParams(
+      Object.entries(filter).filter(([, v]) => v) as [string, string][]
+    ).toString();
+    const body = await this.fetch<{ success: boolean; data: { transactions: AdminTransaction[] } }>(
+      `/api/admin/transactions${qs ? `?${qs}` : ""}`
+    );
+    return body.data.transactions;
+  }
+
+  static async markPayoutPaid(id: string, utrReference: string): Promise<void> {
+    await this.fetch(`/api/admin/transactions/${id}/mark-paid`, {
+      method: "POST",
+      body: JSON.stringify({ utrReference }),
+    });
+  }
+
+  static async retryRefund(id: string): Promise<void> {
+    await this.fetch(`/api/admin/transactions/${id}/retry`, { method: "POST" });
   }
 }

@@ -11,9 +11,11 @@ vi.mock("../config/database.js", () => {
     bookingRequest: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
     },
-    negotiation: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn(), create: vi.fn() },
+    paymentTransaction: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    negotiation: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
     negotiationOffer: { updateMany: vi.fn(), create: vi.fn() },
     bookingTimelineEvent: { create: vi.fn() },
     $queryRaw: vi.fn().mockResolvedValue([]),
@@ -101,22 +103,28 @@ describe("buildBookingNotifications — recipients", () => {
     [{ kind: "REQUESTED" }, [["user-owner", "BOOKING_REQUESTED"]]],
     [{ kind: "ACCEPTED" }, [["user-renter", "BOOKING_ACCEPTED"]]],
     [{ kind: "REJECTED" }, [["user-renter", "BOOKING_REJECTED"]]],
-    [{ kind: "CANCELLED", refundedPaise: 0 }, [["user-owner", "BOOKING_CANCELLED"]]],
+    [{ kind: "CANCELLED", by: "RENTER", refundedPaise: 0 }, [["user-owner", "BOOKING_CANCELLED"]]],
+    [{ kind: "CANCELLED", by: "OWNER", refundedPaise: 500000 }, [["user-renter", "BOOKING_CANCELLED"]]],
+    [{ kind: "EXPIRED", reason: "PAYMENT" }, [["user-renter", "BOOKING_EXPIRED"], ["user-owner", "BOOKING_EXPIRED"]]],
+    [{ kind: "OWNER_NO_SHOW", refundedPaise: 500000 }, [["user-renter", "OWNER_NO_SHOW"], ["user-owner", "OWNER_NO_SHOW"]]],
+    [{ kind: "LATE_PAYMENT_REFUNDED", refundedPaise: 500000 }, [["user-renter", "PAYMENT_REFUNDED"]]],
     [{ kind: "PAYMENT_RECEIVED" }, [["user-owner", "PAYMENT_RECEIVED"], ["user-renter", "PAYMENT_CONFIRMED"]]],
     [{ kind: "HANDOVER_STARTED", deadline: new Date() }, [["user-renter", "HANDOVER_STARTED"]]],
     [{ kind: "RENT_RELEASED", auto: false }, [["user-owner", "RENT_RELEASED"]]],
     [{ kind: "RENT_RELEASED", auto: true }, [["user-owner", "RENT_RELEASED"], ["user-renter", "INSPECTION_AUTO_ACCEPTED"]]],
-    [{ kind: "HANDOVER_ISSUE" }, [["user-owner", "HANDOVER_ISSUE_REPORTED"]]],
+    [{ kind: "HANDOVER_ISSUE", responseDeadline: new Date() }, [["user-owner", "HANDOVER_ISSUE_REPORTED"]]],
+    [{ kind: "HANDOVER_ISSUE_CONTESTED" }, [["user-renter", "HANDOVER_ISSUE_CONTESTED"]]],
     [{ kind: "RETURN_INITIATED", early: false }, [["user-owner", "RETURN_INITIATED"]]],
     [{ kind: "RETURN_RECEIVED", deadline: new Date() }, [["user-renter", "RETURN_RECEIVED"]]],
-    [{ kind: "RETURN_NOT_RECEIVED" }, [["user-renter", "RETURN_NOT_RECEIVED"]]],
+    [{ kind: "RETURN_NOT_RECEIVED", responseDeadline: new Date() }, [["user-renter", "RETURN_NOT_RECEIVED"]]],
     [{ kind: "RETURN_ACCEPTED", auto: false }, [["user-renter", "DEPOSIT_REFUNDED"]]],
     [{ kind: "RETURN_ACCEPTED", auto: true }, [["user-renter", "DEPOSIT_REFUNDED"], ["user-owner", "BOOKING_COMPLETED"]]],
-    [{ kind: "DAMAGE_CLAIMED", amountPaise: 20000 }, [["user-renter", "DAMAGE_CLAIM_FILED"]]],
+    [{ kind: "DAMAGE_CLAIMED", amountPaise: 20000, responseDeadline: new Date() }, [["user-renter", "DAMAGE_CLAIM_FILED"]]],
     [{ kind: "CLAIM_ACCEPTED", payoutPaise: 20000, refundPaise: 480000 }, [["user-owner", "DAMAGE_CLAIM_ACCEPTED"]]],
     [{ kind: "CLAIM_DISPUTED" }, [["user-owner", "DAMAGE_CLAIM_DISPUTED"]]],
     [{ kind: "DISPUTE_RESOLVED", decision: "PAY_OWNER" }, [["user-owner", "DISPUTE_RESOLVED"], ["user-renter", "DISPUTE_RESOLVED"]]],
-    [{ kind: "NON_RETURN_REPORTED" }, [["user-renter", "NON_RETURN_REPORTED"]]],
+    [{ kind: "NON_RETURN_REPORTED", bySystem: false, responseDeadline: new Date() }, [["user-renter", "NON_RETURN_REPORTED"]]],
+    [{ kind: "NON_RETURN_REPORTED", bySystem: true, responseDeadline: null }, [["user-owner", "NON_RETURN_REPORTED"], ["user-renter", "NON_RETURN_REPORTED"]]],
     [{ kind: "NEGOTIATION_OFFER", by: "RENTER", amountPaise: 150000 }, [["user-owner", "NEGOTIATION_OFFER"]]],
     [{ kind: "NEGOTIATION_OFFER", by: "OWNER", amountPaise: 180000 }, [["user-renter", "NEGOTIATION_OFFER"]]],
     [{ kind: "NEGOTIATION_ACCEPTED", by: "OWNER", amountPaise: 180000 }, [["user-renter", "NEGOTIATION_ACCEPTED"]]],
@@ -224,28 +232,27 @@ describe("service transitions trigger notifications", () => {
     (BusinessService.getBusinessByUserId as any).mockImplementation(async (uid: string) => businesses[uid] ?? null);
   });
 
+  /** Service reads get the booking row; the notifier's context query (it uses `select`) gets the party details. */
+  function serveBooking(row: Record<string, unknown>) {
+    p.bookingRequest.findUnique.mockImplementation(async (args: any) => (args?.select ? dbBooking : { ...row }));
+  }
+
   it("owner accepting a request notifies the renter, after the state change", async () => {
-    p.bookingRequest.findUnique
-      .mockResolvedValueOnce(booking) // loadForParty
-      .mockResolvedValueOnce(dbBooking); // notifier context
-    p.resource.findUnique.mockResolvedValue({ id: "res-1", quantity: 10 });
-    p.bookingRequest.updateMany.mockResolvedValue({ count: 1 });
-    p.bookingRequest.findUniqueOrThrow.mockResolvedValue({ ...booking, bookingStatus: "BOOKING_ACCEPTED" });
+    serveBooking(booking);
+    p.resource.findUnique.mockResolvedValue({ id: "res-1", quantity: 10, deletedAt: null });
+    p.bookingRequest.update.mockImplementation(async ({ data }: any) => ({ ...booking, ...data }));
 
     await BookingService.updateBookingStatus("book-1", "user-owner", { status: "accepted" });
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(p.bookingRequest.updateMany).toHaveBeenCalled();
+    expect(p.bookingRequest.update).toHaveBeenCalled();
     expect(notifyMany).toHaveBeenCalledWith([expect.objectContaining({ userId: "user-renter", type: "BOOKING_ACCEPTED" })]);
-    expect(p.bookingRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(notifyMany.mock.invocationCallOrder[0]);
+    expect(p.bookingRequest.update.mock.invocationCallOrder[0]).toBeLessThan(notifyMany.mock.invocationCallOrder[0]);
   });
 
   it("renter cancelling notifies the owner", async () => {
-    p.bookingRequest.findUnique
-      .mockResolvedValueOnce(booking)
-      .mockResolvedValueOnce(dbBooking);
-    p.bookingRequest.updateMany.mockResolvedValue({ count: 1 });
-    p.bookingRequest.findUniqueOrThrow.mockResolvedValue({ ...booking, bookingStatus: "CANCELLED" });
+    serveBooking(booking);
+    p.bookingRequest.update.mockImplementation(async ({ data }: any) => ({ ...booking, ...data }));
 
     await BookingService.updateBookingStatus("book-1", "user-renter", { status: "cancelled" });
     await new Promise((r) => setTimeout(r, 0));

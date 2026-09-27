@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { AdminService } from "../services/admin.service.js";
 import { BookingService } from "../services/booking.service.js";
+import { PaymentService } from "../services/payment.service.js";
 import { GstinService } from "../services/gstin.service.js";
 import { audit } from "../services/audit.service.js";
 import { adminLoginSchema } from "../schemas/auth.schema.js";
@@ -14,10 +15,27 @@ const rejectSchema = z.object({
 });
 
 const listUsersQuery = paginationSchema.extend({
-  status: z.enum(["PENDING", "VERIFIED", "REJECTED"]).optional(),
+  status: z.enum(["PENDING", "VERIFIED", "REJECTED", "SUSPENDED"]).optional(),
 });
 
 const idParam = z.string().min(1).max(64);
+
+const suspendSchema = z.object({
+  reason: z.string().min(5, "Give a reason for the suspension").max(1000),
+});
+
+const markPaidSchema = z.object({
+  utrReference: z.string().trim().min(6, "Enter the bank UTR / transaction reference").max(64),
+});
+
+const transactionsQuery = z.object({
+  direction: z.enum(["TO_OWNER", "TO_RENTER"]).optional(),
+  status: z.enum(["PENDING", "PROCESSING", "FAILED", "COMPLETED"]).optional(),
+});
+
+const disputesQuery = z.object({
+  status: z.enum(["OPEN", "ESCALATED", "RESOLVED", "ALL"]).default("ALL"),
+});
 
 export class AdminController {
   /** POST /api/admin/login */
@@ -109,30 +127,89 @@ export class AdminController {
     }
   }
 
-  /** GET /api/admin/disputes */
-  static async listDisputes(req: Request, res: Response, next: NextFunction): Promise<void> {
+  /** PATCH /api/admin/users/:id/suspend */
+  static async suspendUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const page = paginationSchema.parse(req.query);
-      const { items, nextCursor } = await AdminService.listDisputes(page);
-      res.status(200).json({ success: true, data: { bookings: items, count: items.length, nextCursor } });
+      const id = idParam.parse(req.params.id);
+      const { reason } = suspendSchema.parse(req.body);
+      const user = await AdminService.suspendUser(id, reason);
+      await audit({ action: "ADMIN_USER_SUSPENDED", actorType: "ADMIN", actorId: req.adminId, targetType: "User", targetId: id, req,
+        metadata: { reason } });
+      res.status(200).json({ success: true, data: { user }, message: "User suspended." });
     } catch (error) {
       next(error);
     }
   }
 
-  /** POST /api/admin/bookings/:id/resolve-dispute */
-  static async resolveDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
+  /** PATCH /api/admin/users/:id/reinstate */
+  static async reinstateUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const id = idParam.parse(req.params.id);
+      const user = await AdminService.reinstateUser(id);
+      await audit({ action: "ADMIN_USER_REINSTATED", actorType: "ADMIN", actorId: req.adminId, targetType: "User", targetId: id, req });
+      res.status(200).json({ success: true, data: { user }, message: "User reinstated." });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** GET /api/admin/disputes?status=OPEN|ESCALATED|RESOLVED|ALL */
+  static async listDisputes(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { status } = disputesQuery.parse(req.query);
+      const disputes = await AdminService.listDisputes(status);
+      res.status(200).json({ success: true, data: { disputes, count: disputes.length } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** POST /api/admin/disputes/:bookingId/resolve (also mounted at /bookings/:id/resolve-dispute) */
+  static async resolveDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = idParam.parse(req.params.bookingId ?? req.params.id);
       const input = adminResolveDisputeSchema.parse(req.body);
       const booking = await BookingService.adminResolveDispute(id, req.adminId!, input);
       await audit({ action: "ADMIN_DISPUTE_RESOLVED", actorType: "ADMIN", actorId: req.adminId, targetType: "BookingRequest", targetId: id, req,
         metadata: { decision: input.decision, resolutionAmountPaise: input.resolutionAmountPaise } });
-      res.status(200).json({
-        success: true,
-        data: { booking },
-        message: `Dispute successfully resolved with decision: ${input.decision}.`,
-      });
+      res.status(200).json({ success: true, data: { booking }, message: `Dispute resolved: ${input.decision}.` });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** GET /api/admin/transactions?direction=TO_OWNER|TO_RENTER&status=PENDING|FAILED|COMPLETED */
+  static async listTransactions(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { direction, status } = transactionsQuery.parse(req.query);
+      const transactions = await PaymentService.listTransactions({ direction, status });
+      res.status(200).json({ success: true, data: { transactions, count: transactions.length } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** POST /api/admin/transactions/:id/mark-paid — record the UTR of an owner payout */
+  static async markPayoutPaid(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = idParam.parse(req.params.id);
+      const { utrReference } = markPaidSchema.parse(req.body);
+      const transaction = await PaymentService.markPayoutPaid(id, req.adminId!, utrReference);
+      await audit({ action: "ADMIN_PAYOUT_MARKED_PAID", actorType: "ADMIN", actorId: req.adminId, targetType: "PaymentTransaction", targetId: id, req,
+        metadata: { utrReference } });
+      res.status(200).json({ success: true, data: { transaction }, message: "Payout marked as paid." });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** POST /api/admin/transactions/:id/retry — re-send a failed renter refund */
+  static async retryRefund(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = idParam.parse(req.params.id);
+      const transaction = await PaymentService.retryRefund(id);
+      await audit({ action: "ADMIN_REFUND_RETRIED", actorType: "ADMIN", actorId: req.adminId, targetType: "PaymentTransaction", targetId: id, req });
+      res.status(200).json({ success: true, data: { transaction } });
     } catch (error) {
       next(error);
     }

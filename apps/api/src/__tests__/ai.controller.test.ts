@@ -5,6 +5,17 @@ import { signReply } from "../utils/reply-signature.js";
 import { VectorStoreService } from "../services/rag/vector-store.js";
 import { multiItemListingMatches } from "./fixtures/multi-item-listings.js";
 
+// Inventory answers read listings from the database; use an in-memory one.
+vi.mock("../config/database.js", async () => {
+  const { createFakePrisma } = await import("./helpers/fake-prisma.js");
+  return { prisma: createFakePrisma() };
+});
+
+// Use the built-in answers so these tests don't depend on a live LLM.
+beforeAll(() => {
+  for (const k of ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]) delete process.env[k];
+});
+
 function makeRes() {
   const res = {
     status: vi.fn(),
@@ -86,7 +97,7 @@ describe("AiController.handleConciergeQuery", () => {
     expect(callArg.data.reply.toLowerCase()).toContain("escrow");
   }, 15000);
 
-  it("should respond with 200 and matched listings for multi-item order request", async () => {
+  it("should respond with 200 and only real matches for a multi-item order request", async () => {
     const req = {
       body: {
         message: "I want to order 30 chairs, 40 tables on 28th October",
@@ -102,8 +113,9 @@ describe("AiController.handleConciergeQuery", () => {
     expect(res.json).toHaveBeenCalled();
     const callArg = res.json.mock.calls[0][0];
     expect(callArg.success).toBe(true);
-    expect(callArg.data.results.length).toBeGreaterThan(0);
-    expect(callArg.data.results.some((r: any) => r.title.toLowerCase().includes("chair"))).toBe(true);
-    expect(callArg.data.results.some((r: any) => r.title.toLowerCase().includes("table"))).toBe(true);
+    expect(callArg.data.intent).toBe("listing_inquiry");
+    // Nothing is listed in the empty test database, so nothing may be shown
+    expect(callArg.data.results).toEqual([]);
+    expect(callArg.data.reply).toContain("No chairs are listed");
   });
 });

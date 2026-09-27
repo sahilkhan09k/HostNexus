@@ -32,17 +32,21 @@ import {
   TrendingDown,
   Handshake,
   RefreshCw,
+  KeyRound,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import { useRealtimeEvent } from "@/contexts/notification-context";
 import { ImageUploader } from "@/components/ui/image-uploader";
+import { PaymentCancelledError } from "@/lib/razorpay";
 import {
   getBookingRequests,
   getBookingRequestById,
   updateBookingStatus,
-  payEscrow,
+  payForBooking,
   markHandover,
+  respondToHandoverIssue,
   submitRenterInspection,
   initiateReturn,
   submitOwnerReceipt,
@@ -55,8 +59,92 @@ import {
   type Negotiation,
   type NegotiationOffer,
 } from "@/lib/api-client";
-import type { BookingRequestWithDetails, ClaimType, DisputeReason } from "@hostnexus/types";
+import type { BookingRequestWithDetails, ClaimType, DisputeReason, PaymentTransaction } from "@hostnexus/types";
 import { mediaUrl } from "@/lib/media";
+
+const inr = (paise: number | null | undefined) => `₹${((paise ?? 0) / 100).toLocaleString("en-IN")}`;
+
+/** The deadline that currently drives a booking forward, if any. */
+function activeDeadline(b: BookingRequestWithDetails, isOwner: boolean): { label: string; at: string; note: string } | null {
+  const dispute = b.disputes?.[0];
+  switch (b.bookingStatus) {
+    case "BOOKING_ACCEPTED":
+      if (b.financialStatus === "PENDING_PAYMENT" && b.paymentDeadline) {
+        return { label: isOwner ? "Renter must pay within" : "Pay within", at: b.paymentDeadline, note: "Unpaid bookings are cancelled automatically." };
+      }
+      if (b.financialStatus === "FUNDS_HELD" && b.handoverDeadline) {
+        return { label: isOwner ? "Hand over within" : "Owner must hand over within", at: b.handoverDeadline, note: "If the owner misses this, the renter is refunded in full." };
+      }
+      return null;
+    case "HANDOVER_INSPECTION":
+      return b.renterInspectionDeadline
+        ? { label: isOwner ? "Renter inspection ends in" : "Inspect within", at: b.renterInspectionDeadline, note: "No report by then = accepted; rent goes to the owner." }
+        : null;
+    case "RETURN_INITIATED":
+      return b.ownerReceiptDeadline
+        ? { label: isOwner ? "Confirm receipt within" : "Owner must confirm within", at: b.ownerReceiptDeadline, note: "Receipt is confirmed automatically after this." }
+        : null;
+    case "OWNER_INSPECTION":
+      return b.ownerInspectionDeadline
+        ? { label: isOwner ? "Inspect return within" : "Owner inspection ends in", at: b.ownerInspectionDeadline, note: "No claim by then = deposit refunded to the renter." }
+        : null;
+    case "DISPUTED":
+      if (dispute?.status === "OPEN" && dispute.responseDeadline) {
+        const ownerMustAnswer = dispute.kind === "HANDOVER_ISSUE";
+        return {
+          label: ownerMustAnswer === isOwner ? "Respond within" : `${ownerMustAnswer ? "Owner" : "Renter"} must respond within`,
+          at: dispute.responseDeadline,
+          note: ownerMustAnswer
+            ? "No owner response = renter refunded in full."
+            : "No renter response = claim accepted.",
+        };
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
+function DeadlineChip({ label, at, note }: { label: string; at: string; note: string }) {
+  const t = useCountdown(at);
+  const days = Math.floor(t.hours / 24);
+  const text = t.isExpired
+    ? "Expired — processing"
+    : days > 0
+    ? `${days}d ${t.hours % 24}h ${String(t.minutes).padStart(2, "0")}m`
+    : `${String(t.hours).padStart(2, "0")}:${String(t.minutes).padStart(2, "0")}:${String(t.seconds).padStart(2, "0")}`;
+  return (
+    <span
+      title={`${note} Deadline: ${new Date(at).toLocaleString()}`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900"
+    >
+      <Clock className="w-3.5 h-3.5 text-amber-600" />
+      {label} <span className="font-mono">{text}</span>
+    </span>
+  );
+}
+
+const TX_LABELS: Record<string, string> = {
+  ESCROW_DEPOSIT: "Paid into escrow",
+  FULL_REFUND: "Full refund to renter",
+  RENT_REFUND: "Rent refund to renter",
+  DEPOSIT_REFUND: "Deposit refund to renter",
+  RENT_PAYOUT: "Rent + transport payout to owner",
+  DAMAGE_PAYOUT: "Deposit payout to owner",
+};
+
+function txStatus(t: PaymentTransaction): { text: string; cls: string } {
+  if (t.direction === "IN") return { text: "Received", cls: "text-green-700 bg-green-50" };
+  if (t.status === "COMPLETED") {
+    return t.direction === "TO_OWNER"
+      ? { text: `Paid · UTR ${t.utrReference ?? "—"}`, cls: "text-green-700 bg-green-50" }
+      : { text: "Refunded via Razorpay", cls: "text-green-700 bg-green-50" };
+  }
+  if (t.status === "FAILED") return { text: "Refund retrying", cls: "text-rose-700 bg-rose-50" };
+  return t.direction === "TO_OWNER"
+    ? { text: "Payout queued", cls: "text-amber-800 bg-amber-50" }
+    : { text: "Refund processing", cls: "text-amber-800 bg-amber-50" };
+}
 
 // Countdown timer helper hook
 function useCountdown(targetDate: string | null | undefined) {
@@ -105,9 +193,10 @@ export default function BookingsPage() {
 }
 
 function BookingsPageContent() {
-  const { business } = useAuth();
+  const { user, business } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const myBusinessId = business?.id;
 
   const [activeTab, setActiveTab] = useState<"incoming" | "outgoing" | "disputes">("incoming");
   const [bookings, setBookings] = useState<BookingRequestWithDetails[]>([]);
@@ -124,13 +213,31 @@ function BookingsPageContent() {
   const [rejectModal, setRejectModal] = useState<{ id: string; name: string } | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
+  const [cancelModal, setCancelModal] = useState<{ id: string; name: string; asOwner: boolean; funded: boolean } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  // Owner handover: renter's code + condition photos
+  const [handoverModal, setHandoverModal] = useState<{ id: string; name: string } | null>(null);
+  const [handoverCode, setHandoverCode] = useState("");
+  const [handoverPhotos, setHandoverPhotos] = useState<string[]>([]);
+  const [handoverNotes, setHandoverNotes] = useState("");
+
   const [handoverIssueModal, setHandoverIssueModal] = useState(false);
   const [handoverIssueText, setHandoverIssueText] = useState("");
   const [handoverIssuePhotos, setHandoverIssuePhotos] = useState<string[]>([]);
+  const [receivedQty, setReceivedQty] = useState<number>(0);
+
+  // Owner's answer to a renter's handover issue
+  const [contestModal, setContestModal] = useState<{ id: string } | null>(null);
+  const [contestNotes, setContestNotes] = useState("");
 
   const [returnModal, setReturnModal] = useState(false);
   const [returnNotes, setReturnNotes] = useState("");
   const [returnPhotos, setReturnPhotos] = useState<string[]>([]);
+  const [returnedQty, setReturnedQty] = useState<number>(0);
+
+  const [receiptModal, setReceiptModal] = useState<{ id: string; booked: number; returned: number } | null>(null);
+  const [receiptQty, setReceiptQty] = useState<number>(0);
 
   const [damageClaimModal, setDamageClaimModal] = useState(false);
   const [claimType, setClaimType] = useState<ClaimType>("DAMAGE");
@@ -142,7 +249,6 @@ function BookingsPageContent() {
   const [renterDisputeReason, setRenterDisputeReason] = useState<DisputeReason>("PRE_EXISTING_DAMAGE");
   const [renterDisputeNotes, setRenterDisputeNotes] = useState("");
   const [renterDisputePhotos, setRenterDisputePhotos] = useState<string[]>([]);
-
 
   // ── Negotiation state ─────────────────────────────────────────
   const [negotiateModal, setNegotiateModal] = useState(false);
@@ -157,7 +263,7 @@ function BookingsPageContent() {
       const data = await getBookingRequests(query);
       setError("");
       if (activeTab === "disputes") {
-        setBookings(data.filter((b) => b.bookingStatus === "DISPUTED" || b.bookingStatus === "RETURN_NOT_RECEIVED"));
+        setBookings(data.filter((b) => b.bookingStatus === "DISPUTED"));
       } else {
         setBookings(data);
       }
@@ -231,7 +337,7 @@ function BookingsPageContent() {
     };
   }, [deepLinkBooking, deepLinkTab, router]);
 
-  // Live updates: the other party acted on one of our bookings
+  // Live updates: the other party (or a deadline) changed one of our bookings
   useRealtimeEvent("booking:updated", ({ bookingId }) => {
     void fetchBookings({ silent: true });
     if (bookingId === selectedBookingId) void refreshDetail();
@@ -267,12 +373,15 @@ function BookingsPageContent() {
     }
   };
 
-  const handlePayEscrow = async (id: string) => {
-    setActionLoading(id);
+  const handleCancelConfirm = async () => {
+    if (!cancelModal) return;
+    setActionLoading(cancelModal.id);
     try {
-      await payEscrow(id);
+      await updateBookingStatus(cancelModal.id, "cancelled", cancelReason.trim() || undefined);
+      if (selectedBookingId === cancelModal.id) refreshDetail();
+      setCancelModal(null);
+      setCancelReason("");
       await fetchBookings();
-      if (selectedBookingId === id) refreshDetail();
     } catch (err) {
       alert(getErrorMessage(err, "Action failed"));
     } finally {
@@ -280,25 +389,57 @@ function BookingsPageContent() {
     }
   };
 
-  const handleMarkHandover = async (id: string) => {
-    setActionLoading(id);
+  const handlePayEscrow = async (b: BookingRequestWithDetails) => {
+    setActionLoading(b.id);
     try {
-      await markHandover(id);
+      await payForBooking(b.id, {
+        description: `${b.resource.name} · ${b.totalDays ?? 1} day(s) · rent + deposit${b.transportFeePaise > 0 ? " + transport" : ""}`,
+        prefill: { name: user?.ownerName ?? undefined, email: user?.email, contact: user?.phone ?? undefined },
+      });
       await fetchBookings();
-      if (selectedBookingId === id) refreshDetail();
+      if (selectedBookingId === b.id) refreshDetail();
     } catch (err) {
-      alert(getErrorMessage(err, "Action failed"));
+      if (!(err instanceof PaymentCancelledError)) alert(getErrorMessage(err, "Payment failed"));
+      // Refresh either way: the API may have refunded a late payment or found an earlier one.
+      await fetchBookings();
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleAcceptHandover = async (id: string) => {
-    setActionLoading(id);
+  const handleSubmitHandover = async () => {
+    if (!handoverModal) return;
+    setActionLoading("handover-submit");
     try {
-      await submitRenterInspection(id, { status: "ACCEPTED", notes: "Condition verified and accepted" });
+      await markHandover(handoverModal.id, {
+        handoverCode: handoverCode.trim(),
+        evidenceUrls: handoverPhotos,
+        notes: handoverNotes.trim() || undefined,
+      });
+      if (selectedBookingId === handoverModal.id) refreshDetail();
+      setHandoverModal(null);
+      setHandoverCode("");
+      setHandoverPhotos([]);
+      setHandoverNotes("");
       await fetchBookings();
-      if (selectedBookingId === id) refreshDetail();
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
+      await fetchBookings(); // attempts left may have changed
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleAcceptHandover = async (b: BookingRequestWithDetails) => {
+    setActionLoading(b.id);
+    try {
+      await submitRenterInspection(b.id, {
+        status: "ACCEPTED",
+        receivedQuantity: b.quantity,
+        notes: `All ${b.quantity} unit(s) received and condition accepted`,
+      });
+      await fetchBookings();
+      if (selectedBookingId === b.id) refreshDetail();
     } catch (err) {
       alert(getErrorMessage(err, "Action failed"));
     } finally {
@@ -312,6 +453,7 @@ function BookingsPageContent() {
     try {
       await submitRenterInspection(selectedBooking.id, {
         status: "REPORTED_ISSUE",
+        receivedQuantity: receivedQty,
         issueDescription: handoverIssueText,
         evidenceUrls: handoverIssuePhotos,
       });
@@ -326,11 +468,42 @@ function BookingsPageContent() {
     }
   };
 
+  const handleAcceptIssue = async (id: string) => {
+    if (!confirm("Accept the renter's issue? The renter is refunded in full, the booking is cancelled and you collect the item back.")) return;
+    setActionLoading(id);
+    try {
+      await respondToHandoverIssue(id, { action: "ACCEPT" });
+      await fetchBookings();
+      if (selectedBookingId === id) refreshDetail();
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleContestIssue = async () => {
+    if (!contestModal) return;
+    setActionLoading("contest-issue");
+    try {
+      await respondToHandoverIssue(contestModal.id, { action: "CONTEST", notes: contestNotes.trim() });
+      if (selectedBookingId === contestModal.id) refreshDetail();
+      setContestModal(null);
+      setContestNotes("");
+      await fetchBookings();
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleInitiateReturn = async () => {
     if (!selectedBooking) return;
     setActionLoading("return-submit");
     try {
       await initiateReturn(selectedBooking.id, {
+        returnedQuantity: returnedQty,
         notes: returnNotes,
         returnEvidenceUrls: returnPhotos,
       });
@@ -345,10 +518,12 @@ function BookingsPageContent() {
     }
   };
 
-  const handleOwnerConfirmReceipt = async (id: string, received: boolean) => {
+  const handleOwnerConfirmReceipt = async (id: string, received: boolean, receivedQuantity?: number) => {
+    if (!received && !confirm("Report that nothing was returned? This files a claim on the full deposit and the renter will be asked to respond.")) return;
     setActionLoading(id);
     try {
-      await submitOwnerReceipt(id, { received });
+      await submitOwnerReceipt(id, { received, receivedQuantity });
+      setReceiptModal(null);
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
     } catch (err) {
@@ -487,14 +662,10 @@ function BookingsPageContent() {
         return <span className="rounded-full bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 text-xs font-semibold">Active Rental</span>;
       case "RETURN_INITIATED":
         return <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold">Return Initiated</span>;
-      case "RETURN_NOT_RECEIVED":
-        return <span className="rounded-full bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 text-xs font-semibold">Return Not Received (Dispute)</span>;
       case "OWNER_INSPECTION":
         return <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-0.5 text-xs font-semibold animate-pulse">2-Hr Return Inspection</span>;
       case "DISPUTED":
         return <span className="rounded-full bg-rose-50 text-rose-800 border border-rose-300 px-2.5 py-0.5 text-xs font-semibold">Disputed (Under Review)</span>;
-      case "NON_RETURNED":
-        return <span className="rounded-full bg-stone-900 text-white px-2.5 py-0.5 text-xs font-semibold">Non-Returned / Default</span>;
       case "COMPLETED":
         return <span className="rounded-full bg-green-100 text-green-800 border border-green-200 px-2.5 py-0.5 text-xs font-semibold">Completed & Settled</span>;
       case "CANCELLED":
@@ -508,12 +679,14 @@ function BookingsPageContent() {
     switch (status) {
       case "PENDING_PAYMENT":
         return <span className="text-[11px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded">Unfunded</span>;
+      case "NO_PAYMENT":
+        return <span className="text-[11px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded">No Payment Taken</span>;
       case "FUNDS_HELD":
-        return <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">Rent + Deposit Held</span>;
+        return <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">Full Payment Held in Escrow</span>;
       case "RENT_RELEASED":
         return <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">Rent Released · Deposit Held</span>;
-      case "DEPOSIT_HELD":
-        return <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">Deposit Protected in Escrow</span>;
+      case "FULLY_REFUNDED":
+        return <span className="text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-200">Fully Refunded to Renter</span>;
       case "DEPOSIT_REFUNDED":
         return <span className="text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-200">Deposit 100% Refunded</span>;
       case "DEPOSIT_TO_OWNER":
@@ -528,6 +701,15 @@ function BookingsPageContent() {
   // Timers for selected booking
   const renterTimer = useCountdown(selectedBooking?.renterInspectionDeadline);
   const ownerTimer = useCountdown(selectedBooking?.ownerInspectionDeadline);
+
+  // The viewer's role comes from the booking itself, not from the tab it is shown under
+  const roleOf = (b: BookingRequestWithDetails) => {
+    const isOwner = myBusinessId ? b.providerId === myBusinessId : activeTab === "incoming";
+    const isRenter = myBusinessId ? b.seekerId === myBusinessId : activeTab === "outgoing";
+    return { isOwner, isRenter };
+  };
+  const selectedRole = selectedBooking ? roleOf(selectedBooking) : { isOwner: false, isRenter: false };
+  const selectedDispute = selectedBooking?.disputes?.[0];
 
   return (
     <div className="space-y-6">
@@ -602,8 +784,9 @@ function BookingsPageContent() {
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {bookings.map((b) => {
-            const isOwner = activeTab === "incoming";
-            const isRenter = activeTab === "outgoing";
+            const { isOwner, isRenter } = roleOf(b);
+            const deadline = activeDeadline(b, isOwner);
+            const dispute = b.disputes?.[0];
             const days = b.totalDays || 1;
             const rentINR = (b.rentAmountPaise || 0) / 100;
             const depositINR = (b.securityDepositPaise || 0) / 100;
@@ -617,14 +800,34 @@ function BookingsPageContent() {
               >
                 {/* Header Row */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {getBookingStatusBadge(b.bookingStatus)}
                     {getFinancialBadge(b.financialStatus)}
+                    {deadline && <DeadlineChip {...deadline} />}
                   </div>
                   <span className="text-xs text-stone-400">
                     Booked {new Date(b.createdAt).toLocaleDateString()}
                   </span>
                 </div>
+
+                {/* RENTER: handover code — shown only to the renter, only while handover is pending */}
+                {isRenter && b.bookingStatus === "BOOKING_ACCEPTED" && b.financialStatus === "FUNDS_HELD" && b.handoverCode && (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <KeyRound className="w-5 h-5 text-emerald-700 shrink-0" />
+                    <div className="flex-1 text-xs text-emerald-900">
+                      <strong>Your handover code.</strong> Give it to the owner (or their driver) only when the item is physically in
+                      front of you. Your 1-hour inspection starts when they enter it.
+                    </div>
+                    <span className="font-mono text-2xl font-bold tracking-[0.3em] text-emerald-800">{b.handoverCode}</span>
+                  </div>
+                )}
+
+                {b.bookingStatus === "CANCELLED" && b.rejectionReason && (
+                  <p className="text-xs text-stone-500">
+                    <strong>{b.cancelledBy === "OWNER" ? "Cancelled by owner" : b.cancelledBy === "SYSTEM" ? "Closed automatically" : "Cancelled"}:</strong>{" "}
+                    {b.rejectionReason}
+                  </p>
+                )}
 
                 {/* Resource & Commercial Info */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
@@ -789,28 +992,58 @@ function BookingsPageContent() {
                       return null;
                     })()}
 
-                    {/* RENTER: Pay Escrow */}
-                    {isRenter && b.bookingStatus === "BOOKING_ACCEPTED" && b.financialStatus === "PENDING_PAYMENT" && (
+                    {/* RENTER: cancel before handover (full refund if paid) */}
+                    {isRenter && (b.bookingStatus === "BOOKING_REQUESTED" || b.bookingStatus === "BOOKING_ACCEPTED") && (
                       <button
                         type="button"
-                        onClick={() => handlePayEscrow(b.id)}
+                        onClick={() => setCancelModal({ id: b.id, name: b.resource.name, asOwner: false, funded: b.financialStatus === "FUNDS_HELD" })}
                         disabled={actionLoading === b.id}
-                        className="px-4 py-1.5 rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs flex items-center gap-1.5"
+                        className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-medium text-stone-600 hover:bg-stone-50"
                       >
-                        <DollarSign className="w-3.5 h-3.5" />
-                        <span>Fund Escrow (₹{totalINR.toLocaleString()})</span>
+                        Cancel Booking
                       </button>
                     )}
 
-                    {/* OWNER: Mark Handover Occurred */}
-                    {isOwner && (b.bookingStatus === "BOOKING_ACCEPTED" || b.financialStatus === "FUNDS_HELD") && b.bookingStatus !== "HANDOVER_INSPECTION" && (
+                    {/* RENTER: Pay Escrow via Razorpay Checkout */}
+                    {isRenter && b.bookingStatus === "BOOKING_ACCEPTED" && b.financialStatus === "PENDING_PAYMENT" && (
                       <button
                         type="button"
-                        onClick={() => handleMarkHandover(b.id)}
+                        onClick={() => handlePayEscrow(b)}
                         disabled={actionLoading === b.id}
-                        className="px-4 py-1.5 rounded-lg bg-purple-600 text-xs font-semibold text-white hover:bg-purple-700 shadow-xs"
+                        className="px-4 py-1.5 rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 disabled:opacity-60"
                       >
-                        Mark Handover Occurred (Starts 1h Window)
+                        {actionLoading === b.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DollarSign className="w-3.5 h-3.5" />}
+                        <span>Pay into Escrow (₹{totalINR.toLocaleString()})</span>
+                      </button>
+                    )}
+
+                    {/* OWNER: cancel after accepting (renter refunded, counts on your profile) */}
+                    {isOwner && b.bookingStatus === "BOOKING_ACCEPTED" && (
+                      <button
+                        type="button"
+                        onClick={() => setCancelModal({ id: b.id, name: b.resource.name, asOwner: true, funded: b.financialStatus === "FUNDS_HELD" })}
+                        disabled={actionLoading === b.id}
+                        className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                      >
+                        Cancel Booking
+                      </button>
+                    )}
+
+                    {/* OWNER: waiting for payment */}
+                    {isOwner && b.bookingStatus === "BOOKING_ACCEPTED" && b.financialStatus === "PENDING_PAYMENT" && (
+                      <span className="text-xs text-stone-500 bg-stone-100 px-3 py-1.5 rounded-lg">Waiting for the renter to pay</span>
+                    )}
+
+                    {/* OWNER: Verified handover (renter's code + condition photos) */}
+                    {isOwner && b.bookingStatus === "BOOKING_ACCEPTED" && b.financialStatus === "FUNDS_HELD" && (
+                      <button
+                        type="button"
+                        onClick={() => setHandoverModal({ id: b.id, name: b.resource.name })}
+                        disabled={actionLoading === b.id}
+                        className="px-4 py-1.5 rounded-lg bg-purple-600 text-xs font-semibold text-white hover:bg-purple-700 shadow-xs flex items-center gap-1.5"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        Hand Over (Enter Renter&apos;s Code)
                       </button>
                     )}
 
@@ -821,21 +1054,51 @@ function BookingsPageContent() {
                           type="button"
                           onClick={() => {
                             openDetail(b.id);
+                            setReceivedQty(b.quantity);
                             setHandoverIssueModal(true);
                           }}
                           className="px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 text-xs font-medium text-rose-700 hover:bg-rose-100"
                         >
-                          Report Issue
+                          Report Issue / Short Delivery
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleAcceptHandover(b.id)}
+                          onClick={() => handleAcceptHandover(b)}
                           disabled={actionLoading === b.id}
                           className="px-4 py-1.5 rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs"
                         >
-                          Accept Resource
+                          All {b.quantity} Received — Accept
                         </button>
                       </>
+                    )}
+
+                    {/* OWNER: respond to a renter's handover issue */}
+                    {isOwner && b.bookingStatus === "DISPUTED" && dispute?.kind === "HANDOVER_ISSUE" && dispute.status === "OPEN" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setContestModal({ id: b.id })}
+                          className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-xs font-medium text-stone-700 hover:bg-stone-50"
+                        >
+                          Contest (Send to Admin)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAcceptIssue(b.id)}
+                          disabled={actionLoading === b.id}
+                          className="px-4 py-1.5 rounded-lg bg-rose-600 text-xs font-semibold text-white hover:bg-rose-700 shadow-xs"
+                        >
+                          Accept Issue (Refund Renter)
+                        </button>
+                      </>
+                    )}
+
+                    {/* Dispute waiting on the other side or on admin */}
+                    {b.bookingStatus === "DISPUTED" && dispute?.status === "ESCALATED" && (
+                      <span className="text-xs text-rose-800 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <Scale className="w-3.5 h-3.5" />
+                        With HostNexus admin for a decision
+                      </span>
                     )}
 
                     {/* RENTER: Active Rental -> Initiate Return */}
@@ -844,6 +1107,7 @@ function BookingsPageContent() {
                         type="button"
                         onClick={() => {
                           openDetail(b.id);
+                          setReturnedQty(b.quantity);
                           setReturnModal(true);
                         }}
                         className="px-4 py-1.5 rounded-lg bg-sky-600 text-xs font-semibold text-white hover:bg-sky-700 shadow-xs"
@@ -865,11 +1129,15 @@ function BookingsPageContent() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleOwnerConfirmReceipt(b.id, true)}
+                          onClick={() => {
+                            const returned = b.returnedQuantity ?? b.quantity;
+                            setReceiptQty(returned);
+                            setReceiptModal({ id: b.id, booked: b.quantity, returned });
+                          }}
                           disabled={actionLoading === b.id}
                           className="px-4 py-1.5 rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs"
                         >
-                          Confirm Receipt (Starts 2h Window)
+                          Count &amp; Confirm Receipt (Starts 2h Window)
                         </button>
                       </>
                     )}
@@ -898,11 +1166,15 @@ function BookingsPageContent() {
                       </>
                     )}
 
-                    {/* Disputes are decided by HostNexus Customer Care in the admin console */}
-                    {b.bookingStatus === "DISPUTED" && (
-                      <span className="px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700">
-                        Under Customer Care review
-                      </span>
+                    {/* RENTER: respond to an owner's return claim */}
+                    {isRenter && b.bookingStatus === "DISPUTED" && dispute?.kind === "RETURN_CLAIM" && dispute.status === "OPEN" && (
+                      <button
+                        type="button"
+                        onClick={() => openDetail(b.id)}
+                        className="px-4 py-1.5 rounded-lg bg-rose-600 text-xs font-bold text-white hover:bg-rose-700 shadow-xs"
+                      >
+                        Review &amp; Respond to Claim
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1006,7 +1278,7 @@ function BookingsPageContent() {
                       <h3 className="text-sm font-bold text-stone-900">Side-by-Side Digital Evidence Chain</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                       {/* Stage 1: Pre-Rental Listing Condition */}
                       <div className="rounded-xl border border-stone-200 bg-stone-50/50 p-3 flex flex-col space-y-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
@@ -1035,16 +1307,40 @@ function BookingsPageContent() {
                         </div>
                       </div>
 
-                      {/* Stage 2: Renter Receiving Photos */}
-                      <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-3 flex flex-col space-y-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
-                          2. Receiving Inspection
+                      {/* Stage 2: Owner's condition photos at the verified handover */}
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-3 flex flex-col space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                          2. Owner at Handover
                         </span>
                         <div className="text-xs text-stone-700 min-h-[38px]">
-                          {selectedBooking.evidence?.filter((e) => e.stage === "RECEIVING").length ? (
-                            <span className="text-purple-900 font-medium">Receiving evidence uploaded</span>
+                          {selectedBooking.handoverInitiatedAt ? (
+                            <span className="text-emerald-900 font-medium">
+                              Code-verified {new Date(selectedBooking.handoverInitiatedAt).toLocaleString()} · {selectedBooking.quantity} unit(s)
+                            </span>
                           ) : (
-                            <span className="text-stone-400">Accepted without issue report</span>
+                            <span className="text-stone-400">Not handed over yet</span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 pt-1">
+                          {selectedBooking.evidence?.filter((e) => e.stage === "HANDOVER").map((e, i) => (
+                            <img key={i} src={mediaUrl(e.fileUrl)} alt="Handover" className="w-full h-16 object-cover rounded-lg border border-emerald-300" />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Stage 3: Renter Receiving Photos */}
+                      <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-3 flex flex-col space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
+                          3. Renter Receiving
+                        </span>
+                        <div className="text-xs text-stone-700 min-h-[38px]">
+                          {selectedBooking.receivedQuantity != null ? (
+                            <span className={cn("font-medium", selectedBooking.receivedQuantity < selectedBooking.quantity ? "text-rose-700" : "text-purple-900")}>
+                              Received {selectedBooking.receivedQuantity} of {selectedBooking.quantity}
+                              {selectedBooking.evidence?.some((e) => e.stage === "RECEIVING") ? " · photos uploaded" : ""}
+                            </span>
+                          ) : (
+                            <span className="text-stone-400">Awaiting receiving inspection</span>
                           )}
                         </div>
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
@@ -1057,11 +1353,16 @@ function BookingsPageContent() {
                       {/* Stage 3: Return Evidence */}
                       <div className="rounded-xl border border-sky-200 bg-sky-50/30 p-3 flex flex-col space-y-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700">
-                          3. Renter Return Photos
+                          4. Return
                         </span>
                         <div className="text-xs text-stone-700 min-h-[38px]">
-                          {selectedBooking.evidence?.filter((e) => e.stage === "RETURN").length ? (
-                            <span className="text-sky-900 font-medium">Return photos uploaded</span>
+                          {selectedBooking.returnedQuantity != null ? (
+                            <span className="text-sky-900 font-medium">
+                              Renter returned {selectedBooking.returnedQuantity} of {selectedBooking.quantity}
+                              {selectedBooking.ownerReceivedQuantity != null && (
+                                <> · owner counted {selectedBooking.ownerReceivedQuantity}</>
+                              )}
+                            </span>
                           ) : (
                             <span className="text-stone-400">Awaiting return</span>
                           )}
@@ -1076,7 +1377,7 @@ function BookingsPageContent() {
                       {/* Stage 4: Owner Damage Claim Photos */}
                       <div className="rounded-xl border border-rose-200 bg-rose-50/30 p-3 flex flex-col space-y-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700">
-                          4. Owner Damage Claim
+                          5. Owner Claim
                         </span>
                         <div className="text-xs text-stone-700 min-h-[38px]">
                           {selectedBooking.damageClaims && selectedBooking.damageClaims.length > 0 ? (
@@ -1096,33 +1397,92 @@ function BookingsPageContent() {
                     </div>
                   </div>
 
-                  {/* ACTIVE CLAIMS & DISPUTES PANEL */}
-                  {selectedBooking.damageClaims && selectedBooking.damageClaims.length > 0 && (
+                  {/* HANDOVER ISSUE PANEL (raised by the renter; the owner answers) */}
+                  {selectedDispute?.kind === "HANDOVER_ISSUE" && (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-5 h-5 text-rose-600" />
+                          <h3 className="text-sm font-bold text-rose-900">Handover Issue Reported by Renter</h3>
+                        </div>
+                        <span className="rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold">
+                          {selectedDispute.status === "OPEN" ? "Awaiting owner" : selectedDispute.status === "ESCALATED" ? "With admin" : "Resolved"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-rose-800">
+                        <strong>Renter:</strong> {selectedDispute.renterResponse}
+                        {selectedBooking.receivedQuantity != null && selectedBooking.receivedQuantity < selectedBooking.quantity && (
+                          <> (received {selectedBooking.receivedQuantity} of {selectedBooking.quantity})</>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-rose-700">
+                        The whole payment ({inr(selectedBooking.totalAmountPaise)}) stays in escrow until this is settled.
+                      </p>
+                      {selectedDispute.ownerResponse && (
+                        <p className="text-xs text-stone-800 bg-white p-3 rounded-xl border border-stone-200">
+                          <strong>Owner:</strong> {selectedDispute.ownerResponse}
+                        </p>
+                      )}
+                      {selectedDispute.status === "RESOLVED" && selectedDispute.resolutionNotes && (
+                        <p className="text-xs text-stone-800 bg-white p-3 rounded-xl border border-stone-200">
+                          <strong>Outcome ({selectedDispute.adminDecision}):</strong> {selectedDispute.resolutionNotes}
+                        </p>
+                      )}
+                      {selectedRole.isOwner && selectedDispute.status === "OPEN" && selectedBooking.bookingStatus === "DISPUTED" && (
+                        <div className="flex flex-wrap items-center gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAcceptIssue(selectedBooking.id)}
+                            className="px-4 py-2 rounded-xl bg-rose-600 text-xs font-bold text-white hover:bg-rose-700"
+                          >
+                            Accept Issue — Refund Renter in Full
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setContestModal({ id: selectedBooking.id })}
+                            className="px-4 py-2 rounded-xl border border-stone-300 bg-white text-xs font-bold text-stone-700 hover:bg-stone-50"
+                          >
+                            Contest &amp; Send to Admin
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* RETURN CLAIM PANEL (raised by the owner; the renter answers) */}
+                  {selectedDispute?.kind === "RETURN_CLAIM" && selectedBooking.damageClaims && selectedBooking.damageClaims.length > 0 && (
                     <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <AlertCircle className="w-5 h-5 text-rose-600" />
                           <h3 className="text-sm font-bold text-rose-900">
-                            Active Damage Claim &amp; Dispute
+                            Claim on the Security Deposit
                           </h3>
                         </div>
                         <span className="rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold">
-                          ₹{((selectedBooking.damageClaims[0].claimedAmountPaise || 0) / 100).toLocaleString()} Disputed
+                          {inr(selectedBooking.damageClaims[0].claimedAmountPaise)} claimed ·{" "}
+                          {selectedDispute.status === "OPEN" ? "awaiting renter" : selectedDispute.status === "ESCALATED" ? "with admin" : "resolved"}
                         </span>
                       </div>
 
                       <p className="text-xs text-rose-800">
-                        <strong>Owner Description:</strong> {selectedBooking.damageClaims[0].description}
+                        <strong>{selectedDispute.raisedByRole === "SYSTEM" ? "System" : "Owner"} ({selectedBooking.damageClaims[0].claimType}):</strong>{" "}
+                        {selectedBooking.damageClaims[0].description}
                       </p>
 
-                      {selectedBooking.disputes && selectedBooking.disputes.length > 0 && selectedBooking.disputes[0].renterResponse && (
+                      {selectedDispute.renterResponse && (
                         <p className="text-xs text-stone-800 bg-white p-3 rounded-xl border border-stone-200">
-                          <strong>Renter Response:</strong> {selectedBooking.disputes[0].renterResponse}
+                          <strong>Renter Response:</strong> {selectedDispute.renterResponse}
+                        </p>
+                      )}
+                      {selectedDispute.status === "RESOLVED" && selectedDispute.resolutionNotes && (
+                        <p className="text-xs text-stone-800 bg-white p-3 rounded-xl border border-stone-200">
+                          <strong>Outcome ({selectedDispute.adminDecision}):</strong> {selectedDispute.resolutionNotes}
                         </p>
                       )}
 
-                      {/* Renter Claim Response Buttons (if renter view) */}
-                      {business?.id === selectedBooking.seekerId && selectedBooking.bookingStatus === "DISPUTED" && !selectedBooking.disputes?.[0]?.renterResponse && (
+                      {/* Renter Claim Response Buttons */}
+                      {selectedRole.isRenter && selectedBooking.bookingStatus === "DISPUTED" && selectedDispute.status === "OPEN" && (
                         <div className="flex items-center gap-3 pt-2">
                           <button
                             type="button"
@@ -1271,6 +1631,42 @@ function BookingsPageContent() {
                     </div>
                   )}
 
+                  {/* ESCROW LEDGER — every rupee in and out, with real refund / payout status */}
+                  {selectedBooking.paymentTransactions && selectedBooking.paymentTransactions.length > 0 && (
+                    <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-3">
+                      <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
+                        <Receipt className="w-5 h-5 text-emerald-600" />
+                        <h3 className="text-sm font-bold text-stone-900">Escrow Ledger</h3>
+                      </div>
+                      <ul className="divide-y divide-stone-100">
+                        {selectedBooking.paymentTransactions.map((t) => {
+                          const st = txStatus(t);
+                          return (
+                            <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
+                              <span className="text-stone-700">{TX_LABELS[t.type] ?? t.type}</span>
+                              <span className="flex items-center gap-2">
+                                <span className={cn("rounded px-2 py-0.5 text-[10px] font-semibold", st.cls)}>{st.text}</span>
+                                <span className={cn("font-mono font-bold", t.direction === "IN" ? "text-stone-900" : "text-stone-600")}>
+                                  {t.direction === "IN" ? "+" : "−"}{inr(t.amountPaise)}
+                                </span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {(() => {
+                        const lines = selectedBooking.paymentTransactions!;
+                        const held = lines.reduce((s, t) => s + (t.direction === "IN" ? t.amountPaise : -t.amountPaise), 0);
+                        return (
+                          <p className="text-[11px] text-stone-500 pt-1 border-t border-stone-100">
+                            Still held in escrow: <strong className="text-stone-800">{inr(held)}</strong>. Refunds go back to the
+                            original payment method through Razorpay; owner payouts are settled by HostNexus to the owner&apos;s bank.
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
+
                   {/* VISUAL AUDIT TIMELINE */}
                   <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
                     <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
@@ -1313,8 +1709,23 @@ function BookingsPageContent() {
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 space-y-4 shadow-xl">
             <h3 className="text-base font-bold text-stone-900">Report Handover Defect / Discrepancy</h3>
             <p className="text-xs text-stone-500">
-              Upload photos and describe any undisclosed damage. This will reject physical handover and open a dispute.
+              Upload photos and describe the problem. The whole payment stays in escrow; the owner has 24 hours to accept
+              (you are refunded in full) or contest (HostNexus admin decides).
             </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Units actually received (booked: {selectedBooking?.quantity ?? 0})
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={selectedBooking?.quantity ?? 0}
+                value={receivedQty}
+                onChange={(e) => setReceivedQty(Math.max(0, Math.min(selectedBooking?.quantity ?? 0, parseInt(e.target.value) || 0)))}
+                className="w-32 rounded-xl border border-stone-200 p-2 text-xs"
+              />
+            </div>
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">Issue Description *</label>
@@ -1344,7 +1755,7 @@ function BookingsPageContent() {
               <button
                 type="button"
                 onClick={handleReportHandoverIssue}
-                disabled={actionLoading === "handover-issue" || !handoverIssueText.trim()}
+                disabled={actionLoading === "handover-issue" || handoverIssueText.trim().length < 10 || handoverIssuePhotos.length === 0}
                 className="px-5 py-2 rounded-xl bg-rose-600 text-xs font-semibold text-white hover:bg-rose-700"
               >
                 {actionLoading === "handover-issue" ? "Submitting..." : "Submit Discrepancy & Reject"}
@@ -1361,7 +1772,22 @@ function BookingsPageContent() {
             <h3 className="text-base font-bold text-stone-900">Initiate Resource Return</h3>
             <p className="text-xs text-stone-500">
               Upload return evidence photos to establish the physical condition of the resource upon returning it.
+              The owner has 24 hours to confirm receipt, after which it is confirmed automatically.
             </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Units you are returning (booked: {selectedBooking?.quantity ?? 0})
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={selectedBooking?.quantity ?? 1}
+                value={returnedQty}
+                onChange={(e) => setReturnedQty(Math.max(1, Math.min(selectedBooking?.quantity ?? 1, parseInt(e.target.value) || 1)))}
+                className="w-32 rounded-xl border border-stone-200 p-2 text-xs"
+              />
+            </div>
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">Return Notes</label>
@@ -1392,7 +1818,7 @@ function BookingsPageContent() {
               <button
                 type="button"
                 onClick={handleInitiateReturn}
-                disabled={actionLoading === "return-submit"}
+                disabled={actionLoading === "return-submit" || returnPhotos.length === 0}
                 className="px-5 py-2 rounded-xl bg-sky-600 text-xs font-semibold text-white hover:bg-sky-700"
               >
                 {actionLoading === "return-submit" ? "Submitting..." : "Submit Return Evidence"}
@@ -1543,6 +1969,187 @@ function BookingsPageContent() {
         </div>
       )}
 
+      {/* ── Cancel Modal (renter before handover / owner after accepting) ── */}
+      {cancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 space-y-4 shadow-xl">
+            <h3 className="text-base font-bold text-stone-900">Cancel Booking</h3>
+            <p className="text-xs text-stone-500">
+              Cancel the booking for <strong>{cancelModal.name}</strong>?{" "}
+              {cancelModal.funded
+                ? "The renter's full payment will be refunded through Razorpay."
+                : "No payment has been taken yet."}
+              {cancelModal.asOwner && " Cancelling after accepting is shown on your business profile."}
+            </p>
+            <textarea
+              rows={3}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder={cancelModal.asOwner ? "e.g. The item broke down and can't be delivered…" : "Reason (optional)"}
+              className="w-full rounded-xl border border-stone-200 p-3 text-xs"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCancelModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600"
+              >
+                Keep Booking
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelConfirm}
+                disabled={actionLoading === cancelModal.id || (cancelModal.asOwner && !cancelReason.trim())}
+                className="px-4 py-2 rounded-xl bg-rose-600 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+              >
+                {actionLoading === cancelModal.id ? "Cancelling..." : "Cancel Booking"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Verified Handover Modal (Owner) ─────────────────────────── */}
+      {handoverModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 space-y-4 shadow-xl">
+            <div className="flex items-center gap-2 text-purple-700">
+              <KeyRound className="w-5 h-5" />
+              <h3 className="text-base font-bold text-stone-900">Hand Over {handoverModal.name}</h3>
+            </div>
+            <p className="text-xs text-stone-500">
+              Photograph the item&apos;s condition in front of the renter, then ask them for their 6-digit handover code.
+              Entering it proves the handover happened and starts their 1-hour inspection window.
+            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">Renter&apos;s handover code *</label>
+              <input
+                inputMode="numeric"
+                maxLength={6}
+                value={handoverCode}
+                onChange={(e) => setHandoverCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="••••••"
+                className="w-40 rounded-xl border border-stone-300 px-3 py-2 text-center font-mono text-lg tracking-[0.3em]"
+              />
+            </div>
+
+            <ImageUploader
+              value={handoverPhotos}
+              onChange={setHandoverPhotos}
+              label="Condition photos at handover *"
+              description="Every unit, any existing marks, serial numbers"
+            />
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">Notes</label>
+              <textarea
+                rows={2}
+                value={handoverNotes}
+                onChange={(e) => setHandoverNotes(e.target.value)}
+                placeholder="e.g. 50 chairs counted with the renter's manager, all clean"
+                className="w-full rounded-xl border border-stone-200 p-3 text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setHandoverModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitHandover}
+                disabled={actionLoading === "handover-submit" || handoverCode.length !== 6 || handoverPhotos.length === 0}
+                className="px-5 py-2 rounded-xl bg-purple-600 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+              >
+                {actionLoading === "handover-submit" ? "Verifying..." : "Verify Code & Hand Over"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Contest Handover Issue Modal (Owner) ────────────────────── */}
+      {contestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 space-y-4 shadow-xl">
+            <h3 className="text-base font-bold text-stone-900">Contest the Renter&apos;s Issue</h3>
+            <p className="text-xs text-stone-500">
+              HostNexus admin will compare your handover photos with the renter&apos;s photos and decide. The payment stays in
+              escrow until then.
+            </p>
+            <textarea
+              rows={4}
+              value={contestNotes}
+              onChange={(e) => setContestNotes(e.target.value)}
+              placeholder="Explain why the item was delivered as listed (min. 10 characters)…"
+              className="w-full rounded-xl border border-stone-200 p-3 text-xs"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setContestModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleContestIssue}
+                disabled={actionLoading === "contest-issue" || contestNotes.trim().length < 10}
+                className="px-4 py-2 rounded-xl bg-stone-900 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+              >
+                {actionLoading === "contest-issue" ? "Sending..." : "Send to Admin"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Return Receipt Count Modal (Owner) ──────────────────────── */}
+      {receiptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 space-y-4 shadow-xl">
+            <h3 className="text-base font-bold text-stone-900">Confirm Return Receipt</h3>
+            <p className="text-xs text-stone-500">
+              Count what physically came back. The renter says they returned {receiptModal.returned} of {receiptModal.booked} unit(s).
+              If fewer arrived, you can file a missing-quantity claim during the 2-hour inspection.
+            </p>
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">Units received *</label>
+              <input
+                type="number"
+                min={1}
+                max={receiptModal.booked}
+                value={receiptQty}
+                onChange={(e) => setReceiptQty(Math.max(1, Math.min(receiptModal.booked, parseInt(e.target.value) || 1)))}
+                className="w-32 rounded-xl border border-stone-200 p-2 text-xs"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setReceiptModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOwnerConfirmReceipt(receiptModal.id, true, receiptQty)}
+                disabled={actionLoading === receiptModal.id}
+                className="px-4 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                Confirm {receiptQty} Received
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Reject Modal (Owner) ──────────────────────────────────── */}
       {rejectModal && (

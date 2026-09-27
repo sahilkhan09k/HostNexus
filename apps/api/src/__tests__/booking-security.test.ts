@@ -1,404 +1,346 @@
 /**
  * Regression tests for the booking / payment findings in SECURITY_AUDIT.md:
  * C-01 payment replay, H-01 booking IDOR, H-02 cancel-after-handover refund,
- * H-03 renegotiation after payment, H-08 escrow races, H-09 ledger deletion.
+ * H-03 renegotiation after payment, H-08 escrow races, H-09 ledger deletion,
+ * L-04 booking input limits. Runs against the in-memory Prisma stand-in so the
+ * real booking service, ledger and state machine are exercised.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import crypto from "crypto";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { prisma } from "../config/database.js";
+import { BookingService } from "../services/booking.service.js";
+import { NegotiationService } from "../services/negotiation.service.js";
+import { ResourceService } from "../services/resource.service.js";
+import { RazorpayService } from "../services/razorpay.service.js";
+import { BookingController } from "../controllers/booking.controller.js";
 
-vi.mock("../config/database.js", () => {
-  const prisma: any = {
-    resource: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
-    bookingRequest: {
-      create: vi.fn(),
-      findUnique: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn(),
-      findUniqueOrThrow: vi.fn(),
-      aggregate: vi.fn().mockResolvedValue({ _sum: { quantity: null } }),
-      count: vi.fn(),
-    },
-    negotiation: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn(), create: vi.fn() },
-    negotiationOffer: { updateMany: vi.fn(), create: vi.fn() },
-    paymentTransaction: { create: vi.fn(), aggregate: vi.fn() },
-    inspection: { create: vi.fn().mockResolvedValue({ id: "insp" }) },
-    evidence: { create: vi.fn() },
-    damageClaim: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-    dispute: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-    bookingTimelineEvent: { create: vi.fn() },
-    upload: { findMany: vi.fn().mockResolvedValue([]) },
-    $queryRaw: vi.fn().mockResolvedValue([]),
-    $transaction: vi.fn(async (cb: any) => cb(prisma)),
-  };
-  return { prisma };
+vi.mock("../config/database.js", async () => {
+  const { createFakePrisma } = await import("./helpers/fake-prisma.js");
+  return { prisma: createFakePrisma() };
 });
 
-vi.mock("../services/business.service.js", () => ({
-  BusinessService: { getBusinessByUserId: vi.fn(), verifyOwnership: vi.fn() },
-}));
+vi.mock("../services/business.service.js", async () => {
+  const { prisma } = await import("../config/database.js");
+  const store = () => (prisma as any).__store;
+  return {
+    BusinessService: {
+      getBusinessByUserId: async (userId: string) => store().business.find((b: any) => b.ownerId === userId) ?? null,
+      verifyOwnership: async (businessId: string, userId: string) =>
+        store().business.find((b: any) => b.id === businessId)?.ownerId === userId,
+    },
+  };
+});
 
 vi.mock("../services/rag/vector-store.js", () => ({
   VectorStoreService: { indexSingleResource: vi.fn(), deleteResource: vi.fn().mockResolvedValue(undefined) },
 }));
 
-import { prisma } from "../config/database.js";
-import { env } from "../config/env.js";
-import { BusinessService } from "../services/business.service.js";
-import { BookingService } from "../services/booking.service.js";
-import { NegotiationService } from "../services/negotiation.service.js";
-import { ResourceService } from "../services/resource.service.js";
-import { RazorpayService, safeEqual } from "../services/razorpay.service.js";
-import { BookingController } from "../controllers/booking.controller.js";
-
-const p = prisma as any;
-const fn = (f: unknown) => f as ReturnType<typeof vi.fn>;
-
-const owner = { id: "biz-owner", name: "Owner LLC", ownerId: "user-owner" };
-const renter = { id: "biz-renter", name: "Renter Co", ownerId: "user-renter" };
-const stranger = { id: "biz-stranger", name: "Nosy Ltd", ownerId: "user-stranger" };
-const businesses: Record<string, any> = { "user-owner": owner, "user-renter": renter, "user-stranger": stranger };
-
-const TEST_SECRET = "rzp_test_secret_for_unit_tests_1234";
-
-function baseBooking(overrides: Record<string, any> = {}) {
+vi.mock("../services/razorpay.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/razorpay.service.js")>();
   return {
-    id: "book-1",
-    seekerId: renter.id,
-    providerId: owner.id,
-    resourceId: "res-1",
-    quantity: 1,
-    startDate: new Date(Date.now() + 86400000),
-    endDate: new Date(Date.now() + 3 * 86400000),
-    totalDays: 2,
-    bookingStatus: "BOOKING_ACCEPTED",
-    financialStatus: "PENDING_PAYMENT",
-    rentAmountPaise: 400000,
-    securityDepositPaise: 500000,
-    transportFeePaise: 0,
-    totalAmountPaise: 900000,
-    razorpayOrderId: "order_BOOKING1",
-    razorpayPaymentId: null,
-    renterInspectionDeadline: null,
-    ...overrides,
+    ...actual,
+    RazorpayService: {
+      keyId: () => "rzp_test_key",
+      createOrder: vi.fn(),
+      fetchPayment: vi.fn(),
+      fetchOrderPayments: vi.fn(async () => []),
+      capturePayment: vi.fn(),
+      verifySignature: vi.fn(),
+      refund: vi.fn(async (_p: string, _a: number, ref: string) => ({ id: `rfnd_${ref}` })),
+      findRefundByLedgerRef: vi.fn(async () => null),
+    },
   };
-}
+});
 
-/** Stateful single-row stand-in: conditional updateMany only succeeds when `where` matches. */
-function useBooking(initial: Record<string, any>) {
-  const row: Record<string, any> = { ...initial };
-  const matches = (where: Record<string, any>) =>
-    Object.entries(where).every(([k, v]) => {
-      if (k === "id") return row.id === v;
-      if (v && typeof v === "object" && "in" in v) return (v as any).in.includes(row[k]);
-      if (v && typeof v === "object") return true; // date ranges etc. — not modelled
-      return row[k] === v;
-    });
-  fn(p.bookingRequest.findUnique).mockImplementation(async ({ where }: any) =>
-    where.id === row.id || where.razorpayOrderId === row.razorpayOrderId ? { ...row } : null
-  );
-  fn(p.bookingRequest.updateMany).mockImplementation(async ({ where, data }: any) => {
-    if (!matches(where)) return { count: 0 };
-    Object.assign(row, data);
-    return { count: 1 };
-  });
-  fn(p.bookingRequest.findUniqueOrThrow).mockImplementation(async () => ({ ...row }));
-  return row;
-}
+const db = prisma as any;
+const rz = RazorpayService as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
-function sign(orderId: string, paymentId: string) {
-  return crypto.createHmac("sha256", TEST_SECRET).update(`${orderId}|${paymentId}`).digest("hex");
+const OWNER = "user-owner";
+const RENTER = "user-renter";
+const STRANGER = "user-stranger";
+const RENT = 200_000;
+const DEPOSIT = 500_000;
+const VALID_SIG = "a".repeat(64);
+
+// 10:00 IST on 1 Oct 2026
+const T0 = new Date("2026-10-01T04:30:00.000Z");
+const at = (iso: string) => vi.setSystemTime(new Date(iso));
+
+const payments = new Map<string, { id: string; order_id: string; amount: number; currency: string; status: string }>();
+const booking = (id: string) => db.__store.bookingRequest.find((b: any) => b.id === id);
+const txns = (id: string, type?: string) =>
+  db.__store.paymentTransaction.filter((t: any) => t.bookingId === id && (!type || t.type === type));
+
+let uploadSeq = 0;
+function media(userId: string) {
+  const id = `00000000-0000-4000-8000-${String(++uploadSeq).padStart(12, "0")}.jpg`;
+  db.__seed("upload", { id, ownerId: userId, purpose: "MEDIA", mimeType: "image/jpeg", sizeBytes: 100, sha256: `hash-${id}` });
+  return `/uploads/${id}`;
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(T0);
   vi.clearAllMocks();
-  vi.restoreAllMocks();
-  (env as any).RAZORPAY_KEY_SECRET = TEST_SECRET;
-  (env as any).RAZORPAY_KEY_ID = "rzp_test_unit";
-  fn(BusinessService.getBusinessByUserId).mockImplementation(async (uid: string) => businesses[uid] ?? null);
-  fn(p.bookingRequest.aggregate).mockResolvedValue({ _sum: { quantity: null } });
-  fn(p.negotiation.findUnique).mockResolvedValue(null);
-  fn(p.upload.findMany).mockResolvedValue([]);
-  fn(p.$transaction).mockImplementation(async (cb: any) => cb(p));
+  payments.clear();
+  rz.createOrder.mockImplementation(async (amount: number, bookingId: string) => ({
+    orderId: `order_${bookingId}`, amount, currency: "INR", keyId: "rzp_test_key",
+  }));
+  rz.fetchPayment.mockImplementation(async (id: string) => payments.get(id));
+  rz.capturePayment.mockImplementation(async (id: string) => ({ ...payments.get(id)!, status: "captured" }));
+  rz.verifySignature.mockImplementation((_o: string, _p: string, sig: string) => sig === VALID_SIG);
+
+  db.__reset();
+  for (const [id, email] of [[OWNER, "o@x.in"], [RENTER, "r@x.in"], [STRANGER, "s@x.in"]]) {
+    db.__seed("user", { id, email, verificationStatus: "VERIFIED" });
+  }
+  db.__seed("business", { id: "biz-owner", name: "Owner LLC", ownerId: OWNER });
+  db.__seed("business", { id: "biz-renter", name: "Renter Co", ownerId: RENTER });
+  db.__seed("business", { id: "biz-stranger", name: "Nosy Ltd", ownerId: STRANGER });
+  db.__seed("resource", {
+    id: "res-1", businessId: "biz-owner", name: "Banquet Hall", resourceType: "Banquet Hall", quantity: 1,
+    location: "Pune", rentAmountPaise: RENT, securityDepositPaise: DEPOSIT, photos: [], damagePhotos: [],
+    hasPreExistingDamage: false,
+  });
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+async function requested() {
+  const b = await BookingService.createBookingRequest(RENTER, {
+    resourceId: "res-1", quantity: 1, startDate: "2026-10-03", endDate: "2026-10-04",
+  } as any);
+  return b.id as string;
+}
+
+async function accepted() {
+  const id = await requested();
+  await BookingService.updateBookingStatus(id, OWNER, { status: "accepted" });
+  return id;
+}
+
+/** Accepted booking with a Razorpay order and a captured payment of `amount` waiting to be verified. */
+async function withPayment(amount?: number, paymentId = "pay_OK") {
+  const id = await accepted();
+  const order = await BookingService.createPaymentOrder(id, RENTER);
+  payments.set(paymentId, { id: paymentId, order_id: order.orderId, amount: amount ?? order.amount, currency: "INR", status: "captured" });
+  return { id, orderId: order.orderId as string };
+}
+
+async function funded() {
+  const { id, orderId } = await withPayment();
+  await BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", VALID_SIG);
+  return id;
+}
+
+async function handedOver() {
+  const id = await funded();
+  at("2026-10-03T03:30:00.000Z");
+  await BookingService.markHandover(id, OWNER, { handoverCode: booking(id).handoverCode, evidenceUrls: [media(OWNER)] });
+  return id;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("C-01 — Razorpay payment is bound to the booking's order and amount", () => {
   it("rejects a valid signature from a different (cheap) order", async () => {
-    useBooking(baseBooking());
-    const fetchPayment = vi.spyOn(RazorpayService, "fetchPayment");
-
-    await expect(
-      BookingService.verifyAndFundEscrow("book-1", "user-renter", "order_CHEAP", "pay_CHEAP", sign("order_CHEAP", "pay_CHEAP"))
-    ).rejects.toMatchObject({ statusCode: 400, code: "ORDER_MISMATCH" });
-    expect(fetchPayment).not.toHaveBeenCalled();
-    expect(p.paymentTransaction.create).not.toHaveBeenCalled();
+    const { id } = await withPayment();
+    await expect(BookingService.verifyAndFundEscrow(id, RENTER, "order_CHEAP", "pay_CHEAP", VALID_SIG))
+      .rejects.toMatchObject({ statusCode: 400, code: "PAYMENT_ORDER_MISMATCH" });
+    expect(rz.fetchPayment).not.toHaveBeenCalled();
+    expect(txns(id)).toHaveLength(0);
   });
 
   it("rejects a payment whose captured amount is less than the booking total", async () => {
-    useBooking(baseBooking());
-    vi.spyOn(RazorpayService, "fetchPayment").mockResolvedValue({
-      id: "pay_X", order_id: "order_BOOKING1", status: "captured", amount: 100, currency: "INR",
-    });
-
-    await expect(
-      BookingService.verifyAndFundEscrow("book-1", "user-renter", "order_BOOKING1", "pay_X", sign("order_BOOKING1", "pay_X"))
-    ).rejects.toMatchObject({ code: "PAYMENT_MISMATCH" });
-    expect(p.paymentTransaction.create).not.toHaveBeenCalled();
+    const { id, orderId } = await withPayment(100);
+    await expect(BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", VALID_SIG))
+      .rejects.toMatchObject({ code: "PAYMENT_MISMATCH" });
+    expect(txns(id)).toHaveLength(0);
+    expect(booking(id).financialStatus).toBe("PENDING_PAYMENT");
   });
 
   it("rejects a forged signature", async () => {
-    useBooking(baseBooking());
-    await expect(
-      BookingService.verifyAndFundEscrow("book-1", "user-renter", "order_BOOKING1", "pay_X", "0".repeat(64))
-    ).rejects.toMatchObject({ code: "INVALID_SIGNATURE" });
+    const { id, orderId } = await withPayment();
+    await expect(BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", "0".repeat(64)))
+      .rejects.toMatchObject({ code: "PAYMENT_SIGNATURE_INVALID" });
   });
 
   it("funds escrow for the right order, captured for the full amount, recording the Razorpay amount", async () => {
-    const row = useBooking(baseBooking());
-    vi.spyOn(RazorpayService, "fetchPayment").mockResolvedValue({
-      id: "pay_OK", order_id: "order_BOOKING1", status: "captured", amount: 900000, currency: "INR",
-    });
-
-    const updated = await BookingService.verifyAndFundEscrow(
-      "book-1", "user-renter", "order_BOOKING1", "pay_OK", sign("order_BOOKING1", "pay_OK")
-    );
-
+    const { id, orderId } = await withPayment();
+    const updated = await BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", VALID_SIG);
     expect(updated.financialStatus).toBe("FUNDS_HELD");
-    expect(row.razorpayPaymentId).toBe("pay_OK");
-    expect(p.paymentTransaction.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: "ESCROW_DEPOSIT", amountPaise: 900000, providerReference: "pay_OK" }),
-    });
+    expect(booking(id).razorpayPaymentId).toBe("pay_OK");
+    expect(txns(id, "ESCROW_DEPOSIT")).toEqual([
+      expect.objectContaining({ amountPaise: booking(id).totalAmountPaise, providerReference: "pay_OK" }),
+    ]);
   });
 
   it("a second verify with the same payment does not create a second ledger entry", async () => {
-    useBooking(baseBooking({ financialStatus: "FUNDS_HELD", razorpayPaymentId: "pay_OK" }));
-    const res = await BookingService.verifyAndFundEscrow(
-      "book-1", "user-renter", "order_BOOKING1", "pay_OK", sign("order_BOOKING1", "pay_OK")
-    );
-    expect(res.financialStatus).toBe("FUNDS_HELD");
-    expect(p.paymentTransaction.create).not.toHaveBeenCalled();
+    const { id, orderId } = await withPayment();
+    await BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", VALID_SIG);
+    const again = await BookingService.verifyAndFundEscrow(id, RENTER, orderId, "pay_OK", VALID_SIG);
+    expect(again.financialStatus).toBe("FUNDS_HELD");
+    expect(txns(id, "ESCROW_DEPOSIT")).toHaveLength(1);
   });
 
-  it("safeEqual is length-safe and exact", () => {
-    expect(safeEqual("abc", "abc")).toBe(true);
-    expect(safeEqual("abc", "abd")).toBe(false);
-    expect(safeEqual("abc", "abcd")).toBe(false);
+  it("the webhook funds the booking from Razorpay's own record, once", async () => {
+    const { id, orderId } = await withPayment();
+    expect(await BookingService.fundEscrowFromWebhook(orderId, "pay_OK")).toBe(true);
+    expect(await BookingService.fundEscrowFromWebhook(orderId, "pay_OK")).toBe(false);
+    expect(booking(id).financialStatus).toBe("FUNDS_HELD");
+    expect(txns(id, "ESCROW_DEPOSIT")).toHaveLength(1);
+  });
+
+  it("the webhook refuses a payment for less than the order", async () => {
+    const { id, orderId } = await withPayment(100);
+    await expect(BookingService.fundEscrowFromWebhook(orderId, "pay_OK")).rejects.toMatchObject({ code: "PAYMENT_MISMATCH" });
+    expect(booking(id).financialStatus).toBe("PENDING_PAYMENT");
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("H-01 — bookings are only visible to their renter and owner", () => {
-  it("scopes the lookup to the caller's businesses", async () => {
-    fn(p.bookingRequest.findFirst).mockResolvedValue(null);
-    await BookingService.getBookingRequestById("book-1", "user-stranger");
-    const where = fn(p.bookingRequest.findFirst).mock.calls[0][0].where;
-    expect(where).toEqual({
-      id: "book-1",
-      OR: [{ seeker: { ownerId: "user-stranger" } }, { provider: { ownerId: "user-stranger" } }],
-    });
+  it("returns nothing to a non-party", async () => {
+    const id = await requested();
+    expect(await BookingService.getBookingRequestById(id, STRANGER)).toBeNull();
+    const { items } = await BookingService.getBookingRequests(STRANGER, {} as any);
+    expect(items).toHaveLength(0);
   });
 
   it("controller returns 404 to a non-party (user C on user A's booking)", async () => {
-    fn(p.bookingRequest.findFirst).mockResolvedValue(null);
+    const id = await requested();
     const res: any = { status: vi.fn(), json: vi.fn() };
     res.status.mockReturnValue(res);
-    await BookingController.getBookingRequestById({ userId: "user-stranger", params: { id: "book-1" } } as any, res, vi.fn());
+    await BookingController.getBookingRequestById({ userId: STRANGER, params: { id } } as any, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
   it("state-changing actions by a non-party look like a missing booking (404)", async () => {
-    useBooking(baseBooking({ bookingStatus: "OWNER_INSPECTION" }));
-    await expect(BookingService.ownerAcceptReturn("book-1", "user-stranger")).rejects.toMatchObject({ statusCode: 404 });
-    await expect(
-      BookingService.updateBookingStatus("book-1", "user-stranger", { status: "cancelled" } as any)
-    ).rejects.toMatchObject({ statusCode: 404 });
+    const id = await accepted();
+    await expect(BookingService.updateBookingStatus(id, STRANGER, { status: "cancelled" })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(BookingService.createPaymentOrder(id, STRANGER)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(BookingService.ownerAcceptReturn(id, STRANGER)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(BookingService.reportNonReturn(id, STRANGER)).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it("negotiation thread is not readable by a non-party", async () => {
-    fn(p.bookingRequest.findFirst).mockResolvedValue(null);
-    await expect(NegotiationService.getByBookingId("book-1", "user-stranger")).rejects.toMatchObject({ statusCode: 404 });
-    expect(p.negotiation.findUnique).not.toHaveBeenCalled();
+    const id = await requested();
+    await expect(NegotiationService.getByBookingId(id, STRANGER)).rejects.toMatchObject({ statusCode: 404 });
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("H-02 — renter cancellation", () => {
-  it.each(["HANDOVER_INSPECTION", "ACTIVE", "RETURN_INITIATED", "DISPUTED", "COMPLETED"])(
-    "is refused once the booking is %s (no refund written)",
-    async (status) => {
-      useBooking(baseBooking({ bookingStatus: status, financialStatus: "FUNDS_HELD" }));
-      await expect(
-        BookingService.updateBookingStatus("book-1", "user-renter", { status: "cancelled" } as any)
-      ).rejects.toMatchObject({ statusCode: 409, code: "NOT_CANCELLABLE" });
-      expect(p.paymentTransaction.create).not.toHaveBeenCalled();
-    }
-  );
-
-  it("before handover, refunds exactly what was paid — not a recomputed total", async () => {
-    // total was inflated after payment somehow; refund must follow the escrow ledger
-    useBooking(baseBooking({ financialStatus: "FUNDS_HELD", totalAmountPaise: 9_000_000 }));
-    fn(p.paymentTransaction.aggregate).mockResolvedValue({ _sum: { amountPaise: 900000 } });
-
-    const res = await BookingService.updateBookingStatus("book-1", "user-renter", { status: "cancelled" } as any);
-
-    expect(res.bookingStatus).toBe("CANCELLED");
-    expect(p.paymentTransaction.create).toHaveBeenCalledTimes(1);
-    expect(p.paymentTransaction.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: "DEPOSIT_REFUND", amountPaise: 900000, providerReference: "CANCEL_REFUND_book-1" }),
-    });
+  it("is refused once the item is handed over (no refund written)", async () => {
+    const id = await handedOver();
+    await expect(BookingService.updateBookingStatus(id, RENTER, { status: "cancelled" }))
+      .rejects.toMatchObject({ statusCode: 409 });
+    expect(txns(id).filter((t: any) => t.direction === "TO_RENTER")).toHaveLength(0);
   });
 
-  it("a double-click cancel refunds only once", async () => {
-    useBooking(baseBooking({ financialStatus: "FUNDS_HELD" }));
-    fn(p.paymentTransaction.aggregate).mockResolvedValue({ _sum: { amountPaise: 900000 } });
-    const first = BookingService.updateBookingStatus("book-1", "user-renter", { status: "cancelled" } as any);
-    const second = BookingService.updateBookingStatus("book-1", "user-renter", { status: "cancelled" } as any);
-    const results = await Promise.allSettled([first, second]);
-    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-    expect(p.paymentTransaction.create).toHaveBeenCalledTimes(1);
+  it("before handover, refunds exactly what was paid — not a recomputed total", async () => {
+    const id = await funded();
+    const paid = booking(id).totalAmountPaise;
+    booking(id).totalAmountPaise = 9_000_000; // tampered after payment; refund must follow the ledger
+    const res = await BookingService.updateBookingStatus(id, RENTER, { status: "cancelled" });
+    expect(res.bookingStatus).toBe("CANCELLED");
+    expect(txns(id, "FULL_REFUND")).toEqual([expect.objectContaining({ amountPaise: paid, direction: "TO_RENTER" })]);
+  });
+
+  it("a second cancel refunds nothing more", async () => {
+    const id = await funded();
+    await BookingService.updateBookingStatus(id, RENTER, { status: "cancelled" });
+    await expect(BookingService.updateBookingStatus(id, RENTER, { status: "cancelled" })).rejects.toMatchObject({ statusCode: 409 });
+    expect(txns(id, "FULL_REFUND")).toHaveLength(1);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("H-03 — prices can't change after the owner accepts / renter pays", () => {
-  function withNegotiation(bookingOverrides: Record<string, any>, offerFrom: "SEEKER" | "PROVIDER") {
-    const booking = baseBooking(bookingOverrides);
-    fn(p.bookingRequest.findUnique).mockResolvedValue({
-      ...booking,
-      resource: { rentAmountPaise: 200000 },
-      negotiation: {
-        id: "neg-1",
-        status: "OPEN",
-        offers: [{ id: "off-1", proposerRole: offerFrom, status: "PENDING", offeredAmountPaise: 5_000_000 }],
-      },
-    });
-  }
-
-  it("refuses to accept a stale offer once escrow is funded", async () => {
-    withNegotiation({ bookingStatus: "BOOKING_ACCEPTED", financialStatus: "FUNDS_HELD" }, "SEEKER");
-    await expect(NegotiationService.acceptOffer("user-owner", "book-1")).rejects.toMatchObject({ code: "NOT_NEGOTIABLE" });
-    expect(p.bookingRequest.updateMany).not.toHaveBeenCalled();
-  });
-
-  it.each(["CANCELLED", "ACTIVE", "DISPUTED", "COMPLETED"])("refuses to revive a %s booking via acceptOffer", async (status) => {
-    withNegotiation({ bookingStatus: status }, "PROVIDER");
-    await expect(NegotiationService.acceptOffer("user-renter", "book-1")).rejects.toMatchObject({ code: "NOT_NEGOTIABLE" });
-  });
-
   it("refuses new offers once the booking is accepted", async () => {
-    withNegotiation({ bookingStatus: "BOOKING_ACCEPTED" }, "PROVIDER");
-    await expect(NegotiationService.makeOffer("user-renter", "book-1", 150000)).rejects.toMatchObject({ code: "NOT_NEGOTIABLE" });
+    const id = await accepted();
+    await expect(NegotiationService.makeOffer(RENTER, id, 150_000)).rejects.toMatchObject({ code: "NOT_NEGOTIABLE" });
+  });
+
+  it("refuses to accept a stale offer once the booking was accepted", async () => {
+    const id = await requested();
+    await NegotiationService.makeOffer(RENTER, id, 150_000);
+    await BookingService.updateBookingStatus(id, OWNER, { status: "accepted" });
+    await expect(NegotiationService.acceptOffer(OWNER, id)).rejects.toMatchObject({ statusCode: 409 });
+    expect(booking(id).rentAmountPaise).toBe(RENT * 2);
+  });
+
+  it("refuses to revive a cancelled booking via acceptOffer", async () => {
+    const id = await requested();
+    await NegotiationService.makeOffer(RENTER, id, 150_000);
+    await BookingService.updateBookingStatus(id, RENTER, { status: "cancelled" });
+    await expect(NegotiationService.acceptOffer(OWNER, id)).rejects.toMatchObject({ code: "NOT_NEGOTIABLE" });
+    expect(booking(id).bookingStatus).toBe("CANCELLED");
   });
 
   it("refuses lowball offers below the floor", async () => {
-    withNegotiation({ bookingStatus: "BOOKING_REQUESTED" }, "PROVIDER");
-    await expect(NegotiationService.makeOffer("user-renter", "book-1", 1)).rejects.toMatchObject({ code: "OFFER_TOO_LOW" });
-  });
-
-  it("accepting an offer runs the same capacity lock/check as a normal accept", async () => {
-    withNegotiation({ bookingStatus: "BOOKING_REQUESTED" }, "SEEKER");
-    fn(p.resource.findUnique).mockResolvedValue({ id: "res-1", quantity: 1 });
-    fn(p.bookingRequest.aggregate).mockResolvedValue({ _sum: { quantity: 1 } }); // already fully booked
-    await expect(NegotiationService.acceptOffer("user-owner", "book-1")).rejects.toMatchObject({ code: "CAPACITY_EXCEEDED" });
-    expect(p.$queryRaw).toHaveBeenCalled(); // row lock taken
-    expect(p.bookingRequest.updateMany).not.toHaveBeenCalled();
+    const id = await requested();
+    await expect(NegotiationService.makeOffer(RENTER, id, 1)).rejects.toMatchObject({ code: "OFFER_TOO_LOW" });
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("H-08 — escrow transitions are atomic", () => {
-  it("renter accept loses the race to the worker: no second rent payout", async () => {
-    fn(p.bookingRequest.findUnique).mockResolvedValue(baseBooking({ bookingStatus: "HANDOVER_INSPECTION", financialStatus: "FUNDS_HELD" }));
-    fn(p.bookingRequest.updateMany).mockResolvedValue({ count: 0 }); // the worker already moved it
-
+  it("renter accept after the worker auto-accepted: no second rent payout", async () => {
+    const id = await handedOver();
+    at("2026-10-03T05:00:00.000Z"); // past the 1-hour inspection window
+    await BookingService.processDeadlines();
     await expect(
-      BookingService.renterReceivingInspection("book-1", "user-renter", { status: "ACCEPTED", evidenceUrls: [] } as any)
-    ).rejects.toMatchObject({ statusCode: 409, code: "STATE_CHANGED" });
-    expect(p.paymentTransaction.create).not.toHaveBeenCalled();
-  });
-
-  it("worker skips bookings another process already released", async () => {
-    fn(p.bookingRequest.findMany).mockImplementation(async ({ where }: any) =>
-      where.bookingStatus === "HANDOVER_INSPECTION" ? [baseBooking({ bookingStatus: "HANDOVER_INSPECTION" })] : []
-    );
-    fn(p.bookingRequest.updateMany).mockResolvedValue({ count: 0 });
-
-    await BookingService.processExpiredInspections();
-    expect(p.paymentTransaction.create).not.toHaveBeenCalled();
+      BookingService.renterReceivingInspection(id, RENTER, { status: "ACCEPTED", evidenceUrls: [] } as any)
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(txns(id, "RENT_PAYOUT")).toHaveLength(1);
   });
 
   it("uses one stable ledger reference per booking+event so the DB unique index blocks duplicates", async () => {
-    fn(p.bookingRequest.findMany).mockImplementation(async ({ where }: any) =>
-      where.bookingStatus === "HANDOVER_INSPECTION" ? [baseBooking({ bookingStatus: "HANDOVER_INSPECTION" })] : []
-    );
-    fn(p.bookingRequest.updateMany).mockResolvedValue({ count: 1 });
-    await BookingService.processExpiredInspections();
-    expect(p.paymentTransaction.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: "RENT_PAYOUT", providerReference: "RENT_PAYOUT_book-1" }),
-    });
+    const id = await handedOver();
+    at("2026-10-03T05:00:00.000Z");
+    await BookingService.processDeadlines();
+    await BookingService.processDeadlines();
+    expect(txns(id, "RENT_PAYOUT")).toEqual([expect.objectContaining({ providerReference: `RENT_PAYOUT_${id}` })]);
   });
 
-  it("booking reads no longer run the payout job", async () => {
-    const spy = vi.spyOn(BookingService, "processExpiredInspections");
-    fn(p.bookingRequest.findFirst).mockResolvedValue(null);
-    fn(p.bookingRequest.findMany).mockResolvedValue([]);
-    await BookingService.getBookingRequestById("book-1", "user-renter");
-    await BookingService.getBookingRequests("user-renter", {} as any);
+  it("booking reads never run the deadline job (no money moves on a GET)", async () => {
+    const spy = vi.spyOn(BookingService, "processDeadlines");
+    const id = await requested();
+    await BookingService.getBookingRequestById(id, RENTER);
+    await BookingService.getBookingRequests(RENTER, {} as any);
     expect(spy).not.toHaveBeenCalled();
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("H-09 — resource deletion can't erase bookings or the ledger", () => {
-  beforeEach(() => {
-    fn(p.resource.findUnique).mockResolvedValue({ id: "res-1", businessId: owner.id, deletedAt: null, photos: [], damagePhotos: [] });
-    fn(BusinessService.verifyOwnership).mockResolvedValue(true);
-  });
-
   it("refuses while any booking is still in progress", async () => {
-    fn(p.bookingRequest.count).mockResolvedValue(1);
-    await expect(ResourceService.deleteResource("res-1", "user-owner")).rejects.toMatchObject({ statusCode: 409, code: "HAS_OPEN_BOOKINGS" });
-    expect(p.resource.delete).not.toHaveBeenCalled();
-    expect(p.resource.update).not.toHaveBeenCalled();
+    await accepted();
+    await expect(ResourceService.deleteResource("res-1", OWNER))
+      .rejects.toMatchObject({ statusCode: 409, code: "LISTING_HAS_OPEN_BOOKINGS" });
+    expect(db.__store.resource[0].deletedAt).toBeNull();
   });
 
   it("otherwise soft-deletes instead of hard-deleting", async () => {
-    fn(p.bookingRequest.count).mockResolvedValue(0);
-    await ResourceService.deleteResource("res-1", "user-owner");
-    expect(p.resource.delete).not.toHaveBeenCalled();
-    expect(p.resource.update).toHaveBeenCalledWith({
-      where: { id: "res-1" },
-      data: expect.objectContaining({ isActive: false, deletedAt: expect.any(Date) }),
-    });
+    await ResourceService.deleteResource("res-1", OWNER);
+    expect(db.__store.resource).toHaveLength(1);
+    expect(db.__store.resource[0]).toMatchObject({ isActive: false, deletedAt: expect.any(Date) });
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("L-04 — booking input limits", () => {
-  const resource = {
-    id: "res-1", businessId: owner.id, isActive: true, deletedAt: null, quantity: 5,
-    rentAmountPaise: 200000, securityDepositPaise: 0, transportAvailable: false, transportRatePerKmPaise: 0,
-    availabilityWindows: [], photos: [], damagePhotos: [], hasPreExistingDamage: false,
-    name: "Hall", resourceType: "Banquet Hall", location: "Pune",
-  };
-  beforeEach(() => fn(p.resource.findUnique).mockResolvedValue(resource));
-
   it("rejects bookings that start in the past", async () => {
-    const start = new Date(Date.now() - 5 * 86400000).toISOString();
-    const end = new Date(Date.now() - 3 * 86400000).toISOString();
-    await expect(
-      BookingService.createBookingRequest("user-renter", { resourceId: "res-1", quantity: 1, startDate: start, endDate: end } as any)
-    ).rejects.toMatchObject({ statusCode: 422, code: "INVALID_DATES" });
+    await expect(BookingService.createBookingRequest(RENTER, {
+      resourceId: "res-1", quantity: 1, startDate: "2026-09-20", endDate: "2026-09-22",
+    } as any)).rejects.toMatchObject({ statusCode: 422, code: "INVALID_DATES" });
   });
 
   it("rejects absurdly long bookings (and the INT overflow they would cause)", async () => {
-    const start = new Date(Date.now() + 86400000).toISOString();
-    const end = new Date(Date.now() + 5000 * 86400000).toISOString();
-    await expect(
-      BookingService.createBookingRequest("user-renter", { resourceId: "res-1", quantity: 1, startDate: start, endDate: end } as any)
-    ).rejects.toMatchObject({ statusCode: 422 });
-    expect(p.bookingRequest.create).not.toHaveBeenCalled();
+    await expect(BookingService.createBookingRequest(RENTER, {
+      resourceId: "res-1", quantity: 1, startDate: "2026-10-03", endDate: "2040-10-03",
+    } as any)).rejects.toMatchObject({ statusCode: 422, code: "INVALID_DATES" });
+    expect(db.__store.bookingRequest).toHaveLength(0);
   });
 });

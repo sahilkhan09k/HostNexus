@@ -1,4 +1,5 @@
 import { AuthService } from "./auth";
+import { openRazorpayCheckout } from "./razorpay";
 import type {
   Resource,
   ResourceWithBusiness,
@@ -8,6 +9,8 @@ import type {
   BookingRequestWithDetails,
   CreateBookingRequestInput,
   RenterReceivingInspectionInput,
+  HandoverInput,
+  OwnerHandoverResponseInput,
   ReturnInitiationInput,
   OwnerReceiptInput,
   OwnerDamageClaimInput,
@@ -182,104 +185,76 @@ export async function updateBookingStatus(id: string, status: "accepted" | "reje
   return data.data.bookingRequest;
 }
 
-// ─────────────────────────────────────────
-// Razorpay Checkout
-// ─────────────────────────────────────────
-
-interface RazorpayCheckoutResponse {
-  razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
+interface PaymentOrder {
+  orderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+  totalAmountPaise: number;
+  paymentDeadline: string | null;
 }
 
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => {
-      open: () => void;
-      on: (event: string, cb: (resp: { error?: { description?: string } }) => void) => void;
-    };
-  }
-}
-
-let checkoutScript: Promise<void> | null = null;
-function loadRazorpayCheckout(): Promise<void> {
-  if (typeof window === "undefined") return Promise.reject(new Error("Checkout is only available in the browser"));
-  if (window.Razorpay) return Promise.resolve();
-  checkoutScript ??= new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      checkoutScript = null;
-      reject(new Error("Could not load Razorpay checkout. Check your connection and try again."));
-    };
-    document.body.appendChild(script);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each caller picks its own field from the response
+async function postJson<T>(path: string, body: unknown, fallback: string, pick: (data: any) => T): Promise<T> {
+  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
   });
-  return checkoutScript;
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json.error?.message || json.error?.details?.[0]?.message || fallback);
+    (err as Error & { code?: string }).code = json.error?.code;
+    throw err;
+  }
+  return pick(json.data);
 }
 
 /**
- * Fund escrow: create (or re-use) the booking's Razorpay order, open Razorpay
- * Checkout, then have the API verify the payment server-side. The booking is
- * only marked funded after the API confirms the payment with Razorpay.
+ * Pay a booking into escrow: create (or reuse) its Razorpay order, open
+ * Checkout, then have the API verify the payment with Razorpay and fund escrow.
  */
-export async function payEscrow(bookingId: string): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/pay`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to start payment");
+export async function payForBooking(
+  bookingId: string,
+  opts: { description: string; prefill?: { name?: string; email?: string; contact?: string } }
+): Promise<BookingRequest | null> {
+  let order: PaymentOrder;
+  try {
+    order = await postJson<PaymentOrder>(`/api/bookings/${bookingId}/pay`, {}, "Failed to start payment", (d) => d);
+  } catch (err) {
+    // An earlier checkout already went through; escrow is funded
+    if ((err as Error & { code?: string }).code === "ALREADY_PAID") return null;
+    throw err;
   }
-  const order = (await res.json()).data as { orderId: string; amount: number; currency: string; keyId: string };
 
-  await loadRazorpayCheckout();
-
-  const payment = await new Promise<RazorpayCheckoutResponse>((resolve, reject) => {
-    const checkout = new window.Razorpay!({
-      key: order.keyId,
-      order_id: order.orderId,
-      amount: order.amount,
-      currency: order.currency,
-      name: "HostNexus",
-      description: "Escrow payment",
-      handler: (resp: RazorpayCheckoutResponse) => resolve(resp),
-      modal: { ondismiss: () => reject(new Error("Payment was cancelled")) },
-    });
-    checkout.on("payment.failed", (resp) => reject(new Error(resp.error?.description || "Payment failed")));
-    checkout.open();
+  const result = await openRazorpayCheckout({
+    keyId: order.keyId,
+    orderId: order.orderId,
+    amountPaise: order.amount,
+    description: opts.description,
+    prefill: opts.prefill,
   });
 
-  const verify = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/pay/verify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      razorpayOrderId: payment.razorpay_order_id,
-      razorpayPaymentId: payment.razorpay_payment_id,
-      razorpaySignature: payment.razorpay_signature,
-    }),
-  });
-  if (!verify.ok) {
-    const err = await verify.json().catch(() => ({}));
-    throw new Error(
-      err.error?.message ||
-        "We received your payment but couldn't confirm it yet. It will be confirmed automatically; please refresh in a minute."
-    );
-  }
-  return (await verify.json()).data.booking;
+  return postJson<BookingRequest>(
+    `/api/bookings/${bookingId}/pay/verify`,
+    {
+      razorpayOrderId: result.razorpay_order_id,
+      razorpayPaymentId: result.razorpay_payment_id,
+      razorpaySignature: result.razorpay_signature,
+    },
+    "Payment could not be verified",
+    (d) => d.booking
+  );
 }
 
-export async function markHandover(bookingId: string): Promise<BookingRequest> {
-  const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings/${bookingId}/handover`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Failed to mark handover");
-  }
-  const data = await res.json();
-  return data.data.booking;
+/** Owner: enter the renter's handover code and upload condition photos. */
+export async function markHandover(bookingId: string, input: HandoverInput): Promise<BookingRequest> {
+  return postJson(`/api/bookings/${bookingId}/handover`, input, "Failed to verify handover", (d) => d.booking);
+}
+
+/** Owner: accept (renter refunded in full) or contest (goes to admin) a handover issue. */
+export async function respondToHandoverIssue(bookingId: string, input: OwnerHandoverResponseInput): Promise<BookingRequest> {
+  return postJson(`/api/bookings/${bookingId}/handover-response`, input, "Failed to respond to the issue", (d) => d.booking);
 }
 
 export async function submitRenterInspection(bookingId: string, input: RenterReceivingInspectionInput): Promise<BookingRequest> {
@@ -442,9 +417,18 @@ export async function rejectNegotiation(bookingId: string, reason?: string): Pro
 
 // ─── AI Concierge RAG Pipeline ─────────────────────────────────
 
+/**
+ * Conversation memory the concierge returns with each reply. The chat sends it
+ * back unchanged with the next message so follow-ups ("what about Mumbai?",
+ * "is the first one free on 30th?") are understood. Treat it as opaque.
+ */
+export type AiConciergeContext = Record<string, unknown> & { v: 1 };
+
 export interface AiConciergeQueryInput {
   message: string;
+  /** Assistant turns must carry the signature the API returned with them, or they are ignored */
   history?: Array<{ role: "user" | "assistant"; content: string; listingIds?: string[]; signature?: string }>;
+  context?: AiConciergeContext;
   date?: string;
   location?: string;
   quantity?: number;
@@ -463,9 +447,20 @@ export interface AiListingResult {
   capacity: string;
   quantityAvailable: number;
   unit: string;
-  rating: number;
+  /** Average renter rating; null when the owner has no reviews yet */
+  rating: number | null;
   reviewCount: number;
+  /** % of the requested quantity this listing can supply by itself */
   match: number;
+  /** Which requested item this card answers, e.g. "chairs" */
+  matchedFor: string;
+  requestedQuantity: number | null;
+  /** e.g. "Has 20 of the 30 chairs you need on 28 Oct 2026" */
+  fitLabel: string;
+  /** MATCH meets everything asked; ALTERNATIVE is the right item but misses something (see caveats) */
+  tier: "MATCH" | "ALTERNATIVE";
+  /** e.g. "Not in Pune — in Mumbai", "Over your ₹50,000 budget by ₹5,000" */
+  caveats: string[];
   available: boolean;
   category: string;
   categoryColor: string;
@@ -481,6 +476,7 @@ export interface AiConciergeResponse {
   reply: string;
   /** Server signature of this reply — send it back with the turn in `history` */
   replySignature?: string;
+  context?: AiConciergeContext;
   results: AiListingResult[];
   intent: string;
   sources: string[];

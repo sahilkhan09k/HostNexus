@@ -11,34 +11,35 @@ datasource db {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
+  id           String @id @default(cuid())
+  email        String @unique
   passwordHash String
 
   // KYC & verification
-  // verificationStatus: PENDING | VERIFIED | REJECTED
-  verificationStatus String   @default("PENDING")
-  verificationNotes  String?  // admin rejection reason
+  // verificationStatus: PENDING | VERIFIED | REJECTED | SUSPENDED
+  // Only VERIFIED users can sign in or call the API; SUSPENDED users' listings are hidden.
+  verificationStatus String  @default("PENDING")
+  verificationNotes  String? // admin rejection / suspension reason
 
   // KYC documents (URLs to uploaded files)
-  gstCertificateUrl   String?  // GST Certificate — primary B2B identity doc
-  aadhaarUrl          String?  // Aadhaar — legacy, no longer collected
-  gstin               String?  @unique // extracted from the certificate, verified via gstinapi.in
-  gstLegalName        String?  // legal name returned by the GST registry
-  gstTradeName        String?  // trade name returned by the GST registry
+  gstCertificateUrl String? // GST Certificate — primary B2B identity doc
+  aadhaarUrl        String? // Aadhaar — legacy, no longer collected
+  gstin             String? @unique // extracted from the certificate, verified via gstinapi.in
+  gstLegalName      String? // legal name returned by the GST registry
+  gstTradeName      String? // trade name returned by the GST registry
 
   // Owner personal info
-  ownerName  String?
-  phone      String?
+  ownerName String?
+  phone     String?
 
   // Incremented to revoke every outstanding access/refresh token (reject, logout-all, password change)
-  tokenVersion Int        @default(0)
+  tokenVersion Int @default(0)
 
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  businesses   Business[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  businesses    Business[]
   refreshTokens RefreshToken[]
-  uploads      Upload[]
+  uploads       Upload[]
   notifications Notification[]
 
   @@index([verificationStatus])
@@ -60,15 +61,15 @@ model Admin {
 // Server-side record of every refresh token issued, so tokens can be rotated,
 // revoked on logout/reject, and reuse of an already-rotated token detected.
 model RefreshToken {
-  id         String    @id @default(cuid()) // jti claim
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  familyId   String    // all tokens descending from one login share a family
-  tokenHash  String    @unique // sha256 of the JWT, never the token itself
-  expiresAt  DateTime
-  revokedAt  DateTime?
+  id           String    @id @default(cuid()) // jti claim
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId     String // all tokens descending from one login share a family
+  tokenHash    String    @unique // sha256 of the JWT, never the token itself
+  expiresAt    DateTime
+  revokedAt    DateTime?
   replacedById String?
-  createdAt  DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([familyId])
@@ -77,14 +78,14 @@ model RefreshToken {
 
 // Every file accepted by the upload endpoints. The id is the stored filename.
 model Upload {
-  id         String   @id // e.g. "3f0c...-....jpg"
-  ownerId    String?  // null only for pre-registration KYC uploads
-  owner      User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  purpose    String   // MEDIA | KYC
-  mimeType   String
-  sizeBytes  Int
-  sha256     String
-  createdAt  DateTime @default(now())
+  id        String   @id // e.g. "3f0c...-....jpg"
+  ownerId   String? // null only for pre-registration KYC uploads
+  owner     User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  purpose   String // MEDIA | KYC
+  mimeType  String
+  sizeBytes Int
+  sha256    String
+  createdAt DateTime @default(now())
 
   @@index([ownerId])
   @@map("uploads")
@@ -94,7 +95,7 @@ model Upload {
 model AuditLog {
   id         String   @id @default(cuid())
   action     String
-  actorType  String   // USER | ADMIN | SYSTEM | ANONYMOUS
+  actorType  String // USER | ADMIN | SYSTEM | ANONYMOUS
   actorId    String?
   targetType String?
   targetId   String?
@@ -115,7 +116,7 @@ model Notification {
   id          String    @id @default(cuid())
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type        String    // BOOKING_REQUESTED, BOOKING_ACCEPTED, NEGOTIATION_OFFER, ... (see notification-types.ts)
+  type        String // BOOKING_REQUESTED, BOOKING_ACCEPTED, NEGOTIATION_OFFER, ... (see notification-types.ts)
   title       String
   message     String
   data        Json?
@@ -141,10 +142,10 @@ model RazorpayWebhookEvent {
 }
 
 model Business {
-  id        String     @id @default(cuid())
-  name      String
-  ownerId   String
-  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  name    String
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   // Business address
   addressLine String?
@@ -155,49 +156,50 @@ model Business {
   // Business type (Hotel, Caterer, etc.)
   businessType String?
 
-  resources Resource[]
-  sentBookingRequests     BookingRequest[] @relation("BookingSeeker")
-  receivedBookingRequests BookingRequest[] @relation("BookingProvider")
-  reviewsGiven     Review[]       @relation("ReviewsGiven")
-  reviewsReceived  Review[]       @relation("ReviewsReceived")
-  offersProposed   NegotiationOffer[] @relation("OffersProposed")
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  resources               Resource[]
+  sentBookingRequests     BookingRequest[]   @relation("BookingSeeker")
+  receivedBookingRequests BookingRequest[]   @relation("BookingProvider")
+  reviewsGiven            Review[]           @relation("ReviewsGiven")
+  reviewsReceived         Review[]           @relation("ReviewsReceived")
+  offersProposed          NegotiationOffer[] @relation("OffersProposed")
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
   @@map("businesses")
 }
 
 model Resource {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   businessId   String
-  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   name         String
   description  String?
   resourceType String
-  quantity     Int      @default(1)
+  quantity     Int       @default(1)
   unit         String?
-  status       String   @default("available")
+  status       String    @default("available")
   location     String?
-  isActive     Boolean  @default(true)
+  isActive     Boolean   @default(true)
   deletedAt    DateTime? // soft delete — resources with booking history are never hard-deleted
 
   // Commercial terms & Chain of custody pre-existing conditions (paise: 1 INR = 100 paise)
-  rentAmountPaise       Int      @default(0)
-  securityDepositPaise  Int      @default(0)
-  photos                String[] @default([])
-  hasPreExistingDamage  Boolean  @default(false)
-  damageDescription     String?
-  damagePhotos          String[] @default([])
+  rentAmountPaise      Int      @default(0)
+  securityDepositPaise Int      @default(0)
+  photos               String[] @default([])
+  hasPreExistingDamage Boolean  @default(false)
+  damageDescription    String?
+  damagePhotos         String[] @default([])
 
   // Owner-provided transport. Renter may opt in at booking; fee = rate × distance.
   transportAvailable      Boolean @default(false)
   transportRatePerKmPaise Int     @default(0)
 
-  bookingRequests    BookingRequest[]
+  bookingRequests     BookingRequest[]
   availabilityWindows AvailabilityWindow[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
+  @@index([deletedAt])
   @@index([businessId])
   @@index([resourceType])
   @@index([status])
@@ -213,7 +215,7 @@ model AvailabilityWindow {
   resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
   fromDate   DateTime // inclusive start
   toDate     DateTime // inclusive end
-  note       String?  // optional label e.g. "Available weekdays only"
+  note       String? // optional label e.g. "Available weekdays only"
   createdAt  DateTime @default(now())
 
   @@index([resourceId])
@@ -222,31 +224,35 @@ model AvailabilityWindow {
 }
 
 model BookingRequest {
-  id              String   @id @default(cuid())
-  seekerId        String
-  seeker          Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Restrict)
-  providerId      String
-  provider        Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Restrict)
-  resourceId      String
-  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
-  
+  id         String   @id @default(cuid())
+  seekerId   String
+  // Restrict (not Cascade): the booking ledger must never disappear because a
+  // listing or business was deleted. Listings are soft-deleted instead.
+  seeker     Business @relation("BookingSeeker", fields: [seekerId], references: [id], onDelete: Restrict)
+  providerId String
+  provider   Business @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Restrict)
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+
   quantity        Int
+  // Both dates are calendar days (stored at 00:00 UTC) and INCLUSIVE:
+  // start = end is a one-day booking, totalDays = end - start + 1.
   startDate       DateTime
   endDate         DateTime
   totalDays       Int?
   specialRequests String?
-  
+
   // Dual State Machine (MVP v2)
-  bookingStatus   String   @default("BOOKING_REQUESTED") // BOOKING_REQUESTED, BOOKING_ACCEPTED, HANDOVER_INSPECTION, ACTIVE, RETURN_INITIATED, RETURN_NOT_RECEIVED, OWNER_INSPECTION, DISPUTED, NON_RETURNED, COMPLETED, CANCELLED
-  financialStatus String   @default("PENDING_PAYMENT")  // PENDING_PAYMENT, FUNDS_HELD, RENT_RELEASED, DEPOSIT_HELD, DEPOSIT_REFUNDED, DEPOSIT_TO_OWNER, PARTIAL_SETTLEMENT
-  
+  bookingStatus   String @default("BOOKING_REQUESTED") // BOOKING_REQUESTED, BOOKING_ACCEPTED, HANDOVER_INSPECTION, ACTIVE, RETURN_INITIATED, OWNER_INSPECTION, DISPUTED, COMPLETED, CANCELLED
+  financialStatus String @default("PENDING_PAYMENT") // PENDING_PAYMENT, NO_PAYMENT, FUNDS_HELD, RENT_RELEASED, DEPOSIT_REFUNDED, DEPOSIT_TO_OWNER, PARTIAL_SETTLEMENT, FULLY_REFUNDED
+
   // Legacy status string bridge
-  status          String   @default("pending")
+  status String @default("pending")
 
   // Money in integer paise (₹1 = 100 paise)
-  rentAmountPaise       Int   @default(0)
-  securityDepositPaise  Int   @default(0)
-  totalAmountPaise      Int   @default(0)
+  rentAmountPaise      Int @default(0)
+  securityDepositPaise Int @default(0)
+  totalAmountPaise     Int @default(0)
 
   // Transport choice. SELF = renter arranges their own; PROVIDER = owner delivers.
   // Fee is released to the owner together with rent after handover.
@@ -255,9 +261,11 @@ model BookingRequest {
   transportRatePerKmPaise Int    @default(0)
   transportFeePaise       Int    @default(0)
 
-  // Razorpay order created for this booking and the payment that funded it
-  razorpayOrderId   String? @unique
-  razorpayPaymentId String? @unique
+  // Razorpay binding — the escrow can only be funded by a captured payment of
+  // this exact order and amount, and one payment can never fund two bookings.
+  razorpayOrderId          String? @unique
+  razorpayOrderAmountPaise Int?
+  razorpayPaymentId        String? @unique
 
   // Legacy prices
   proposedPrice   Float?
@@ -278,6 +286,23 @@ model BookingRequest {
   ownerInspectionDeadline  DateTime? // +2 hours from ownerReceivedAt
   completedAt              DateTime?
   nonReturnReportedAt      DateTime?
+  acceptedAt               DateTime?
+  paymentDeadline          DateTime? // unpaid accepted bookings auto-cancel after this
+  fundedAt                 DateTime?
+  handoverDeadline         DateTime? // funded bookings not handed over by this are an owner no-show
+  ownerReceiptDeadline     DateTime? // +24h from returnInitiatedAt; receipt auto-confirmed after this
+  cancelledAt              DateTime?
+  cancelledBy              String? // RENTER | OWNER | SYSTEM
+
+  // Handover code: generated when escrow is funded, shown only to the renter.
+  // The owner must enter it at physical handover to start the inspection window.
+  handoverCode         String?
+  handoverCodeAttempts Int     @default(0)
+
+  // Unit counts at each custody step
+  receivedQuantity      Int? // renter, at handover
+  returnedQuantity      Int? // renter, at return
+  ownerReceivedQuantity Int? // owner, at return receipt
 
   // Relations
   inspections         Inspection[]
@@ -289,8 +314,8 @@ model BookingRequest {
   reviews             Review[]
   negotiation         Negotiation?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([seekerId])
   @@index([providerId])
@@ -305,9 +330,9 @@ model Inspection {
   id            String         @id @default(cuid())
   bookingId     String
   booking       BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  type          String         // RECEIVING, RETURN
+  type          String // RECEIVING, RETURN
   performedById String
-  status        String         // ACCEPTED, REPORTED_ISSUE
+  status        String // ACCEPTED, REPORTED_ISSUE
   quantity      Int
   condition     String?
   notes         String?
@@ -319,18 +344,18 @@ model Inspection {
 }
 
 model Evidence {
-  id           String          @id @default(cuid())
+  id           String         @id @default(cuid())
   bookingId    String
-  booking      BookingRequest  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   inspectionId String?
-  inspection   Inspection?     @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  inspection   Inspection?    @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
   uploadedById String
-  stage        String          // PRE_EXISTING, RECEIVING, RETURN, DAMAGE_CLAIM, RENTER_REBUTTAL
-  type         String          @default("IMAGE") // IMAGE, VIDEO
+  stage        String // PRE_EXISTING, RECEIVING, RETURN, DAMAGE_CLAIM, RENTER_REBUTTAL
+  type         String         @default("IMAGE") // IMAGE, VIDEO
   fileUrl      String
   fileHash     String?
   notes        String?
-  createdAt    DateTime        @default(now())
+  createdAt    DateTime       @default(now())
 
   @@index([bookingId])
   @@index([stage])
@@ -342,7 +367,7 @@ model DamageClaim {
   bookingId          String
   booking            BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   claimantId         String
-  claimType          String         // DAMAGE, MISSING_ITEM, MISSING_QUANTITY, WRONG_ITEM_RETURNED, SEVERE_STAIN, RETURN_NOT_RECEIVED, OTHER
+  claimType          String // DAMAGE, MISSING_ITEM, MISSING_QUANTITY, WRONG_ITEM_RETURNED, SEVERE_STAIN, RETURN_NOT_RECEIVED, OTHER
   description        String
   claimedAmountPaise Int            @default(0)
   status             String         @default("PENDING") // PENDING, DISPUTED, RESOLVED, REJECTED
@@ -360,10 +385,20 @@ model Dispute {
   booking               BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   damageClaimId         String?
   damageClaim           DamageClaim?   @relation(fields: [damageClaimId], references: [id], onDelete: SetNull)
-  status                String         @default("OPEN") // OPEN, RESOLVED
+  // HANDOVER_ISSUE: raised by the renter at handover; the whole payment is at stake, the owner responds.
+  // RETURN_CLAIM:   raised by the owner (damage / missing / fake return / non-return); only the deposit is at stake, the renter responds.
+  kind                  String         @default("RETURN_CLAIM")
+  raisedByRole          String         @default("OWNER") // OWNER | RENTER | SYSTEM
+  // OPEN = waiting for the other party, ESCALATED = waiting for admin, RESOLVED
+  status                String         @default("OPEN")
+  responseDeadline      DateTime? // other party must respond by this, else auto-settled
+  escalatedAt           DateTime?
   renterResponse        String?
-  renterReason          String?        // PRE_EXISTING_DAMAGE, NOT_CAUSED_BY_RENTER, AFTER_RETURN, NORMAL_WEAR_TEAR, INCORRECT_AMOUNT, OTHER
-  adminDecision         String?        // REFUND_RENTER, PAY_OWNER, PARTIAL_SETTLEMENT, REJECT_CLAIM
+  renterReason          String? // PRE_EXISTING_DAMAGE, NOT_CAUSED_BY_RENTER, AFTER_RETURN, NORMAL_WEAR_TEAR, INCORRECT_AMOUNT, OTHER
+  ownerResponse         String?
+  // RETURN_CLAIM: REFUND_RENTER, PAY_OWNER, PARTIAL_SETTLEMENT, REJECT_CLAIM
+  // HANDOVER_ISSUE: FULL_REFUND, REJECT_ISSUE, PARTIAL_REFUND
+  adminDecision         String?
   resolutionAmountPaise Int?
   resolutionNotes       String?
   resolvedById          String?
@@ -378,13 +413,27 @@ model PaymentTransaction {
   id                String         @id @default(cuid())
   bookingId         String
   booking           BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  type              String         // ESCROW_DEPOSIT, RENT_PAYOUT, DEPOSIT_REFUND, DAMAGE_PAYOUT, PARTIAL_SETTLEMENT
+  // ESCROW_DEPOSIT (IN) · FULL_REFUND, RENT_REFUND, DEPOSIT_REFUND (TO_RENTER) · RENT_PAYOUT, DAMAGE_PAYOUT (TO_OWNER)
+  type              String
+  direction         String         @default("IN") // IN | TO_RENTER | TO_OWNER
   amountPaise       Int
-  status            String         @default("COMPLETED") // PENDING, COMPLETED, FAILED
-  providerReference String?        @unique // one row per booking+event (e.g. RENT_PAYOUT_<id>) or Razorpay id
+  // Refunds to the renter go through the Razorpay Refunds API: PENDING → COMPLETED | FAILED (retried).
+  // Owner payouts sit PENDING until an admin settles them and records the bank UTR.
+  status            String         @default("PENDING") // PENDING, COMPLETED, FAILED
+  // Idempotency key for this ledger line (e.g. RENT_PAYOUT_<bookingId>); the
+  // Razorpay payment id for ESCROW_DEPOSIT. Unique so no line can be written twice.
+  providerReference String?        @unique
+  razorpayRefundId  String?
+  utrReference      String?
+  failureReason     String?
+  attempts          Int            @default(0)
+  processedAt       DateTime?
+  processedById     String? // admin who settled an owner payout
   createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([bookingId])
+  @@index([status, direction])
   @@map("payment_transactions")
 }
 
@@ -392,9 +441,9 @@ model BookingTimelineEvent {
   id          String         @id @default(cuid())
   bookingId   String
   booking     BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  eventType   String         // BOOKING_CREATED, ESCROW_FUNDED, HANDOVER_MARKED, RECEIVING_ACCEPTED, RECEIVING_ISSUE, RETURN_INITIATED, OWNER_RECEIPT_CONFIRMED, OWNER_RETURN_ACCEPTED, DAMAGE_CLAIMED, CLAIM_DISPUTED, DISPUTE_RESOLVED, AUTO_TIMEOUT_RELEASE, NON_RETURN_REPORTED
+  eventType   String // BOOKING_CREATED, ESCROW_FUNDED, HANDOVER_MARKED, RECEIVING_ACCEPTED, RECEIVING_ISSUE, RETURN_INITIATED, OWNER_RECEIPT_CONFIRMED, OWNER_RETURN_ACCEPTED, DAMAGE_CLAIMED, CLAIM_DISPUTED, DISPUTE_RESOLVED, AUTO_TIMEOUT_RELEASE, NON_RETURN_REPORTED
   actorId     String?
-  actorRole   String         // OWNER, RENTER, ADMIN, SYSTEM
+  actorRole   String // OWNER, RENTER, ADMIN, SYSTEM
   title       String
   description String
   metadata    Json?
@@ -409,22 +458,22 @@ model BookingTimelineEvent {
 // one review per booking per role.
 // reviewerRole: OWNER (provider reviewing seeker) | RENTER (seeker reviewing provider)
 model Review {
-  id         String   @id @default(cuid())
-  bookingId  String
-  booking    BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  id        String         @id @default(cuid())
+  bookingId String
+  booking   BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
-  reviewerId String   // businessId of the person writing the review
-  reviewer   Business @relation("ReviewsGiven",    fields: [reviewerId], references: [id], onDelete: Cascade)
-  subjectId  String   // businessId of the person being reviewed
-  subject    Business @relation("ReviewsReceived", fields: [subjectId],  references: [id], onDelete: Cascade)
+  reviewerId String // businessId of the person writing the review
+  reviewer   Business @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+  subjectId  String // businessId of the person being reviewed
+  subject    Business @relation("ReviewsReceived", fields: [subjectId], references: [id], onDelete: Cascade)
 
   // reviewerRole: the hat the REVIEWER was wearing in this booking
   // OWNER  → provider reviewing the seeker  (how was the renter?)
   // RENTER → seeker reviewing the provider  (how was the owner?)
-  reviewerRole String  // OWNER | RENTER
+  reviewerRole String // OWNER | RENTER
 
-  rating   Int      // 1–5
-  comment  String?
+  rating  Int // 1–5
+  comment String?
 
   createdAt DateTime @default(now())
 
@@ -441,14 +490,14 @@ model Review {
 // Either side can make a counter-offer; the thread ends when one side
 // accepts (→ the booking price is updated) or either side rejects.
 model Negotiation {
-  id        String   @id @default(cuid())
-  bookingId String   @unique
+  id        String         @id @default(cuid())
+  bookingId String         @unique
   booking   BookingRequest @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   // OPEN | ACCEPTED | REJECTED | CANCELLED
-  status    String   @default("OPEN")
+  status String @default("OPEN")
 
-  offers    NegotiationOffer[]
+  offers NegotiationOffer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -457,31 +506,30 @@ model Negotiation {
 }
 
 model NegotiationOffer {
-  id             String      @id @default(cuid())
-  negotiationId  String
-  negotiation    Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  negotiationId String
+  negotiation   Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
 
   // which business made this offer
-  proposerId     String
-  proposer       Business    @relation("OffersProposed", fields: [proposerId], references: [id], onDelete: Cascade)
+  proposerId String
+  proposer   Business @relation("OffersProposed", fields: [proposerId], references: [id], onDelete: Cascade)
 
   // SEEKER (renter) or PROVIDER (owner)
-  proposerRole   String
+  proposerRole String
 
   // proposed price in paise
   offeredAmountPaise Int
 
-  message        String?  // optional note with the offer
+  message String? // optional note with the offer
 
   // PENDING | COUNTERED | ACCEPTED | REJECTED
-  status         String   @default("PENDING")
+  status String @default("PENDING")
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([negotiationId])
   @@map("negotiation_offers")
 }
-
 
 // ─────────────────────────────────────────
 // Weather-driven Digital Twin

@@ -19,12 +19,16 @@ export const NOTIFICATION_POLICIES = {
   BOOKING_REQUESTED:        { email: true,  toast: true },  // → owner
   BOOKING_ACCEPTED:         { email: true,  toast: true },  // → renter (pay to confirm)
   BOOKING_REJECTED:         { email: true,  toast: true },  // → renter
-  BOOKING_CANCELLED:        { email: true,  toast: true },  // → owner
+  BOOKING_CANCELLED:        { email: true,  toast: true },  // → the other party
+  BOOKING_EXPIRED:          { email: true,  toast: true },  // → both (request unanswered / unpaid)
+  OWNER_NO_SHOW:            { email: true,  toast: true },  // → both (renter refunded in full)
+  PAYMENT_REFUNDED:         { email: true,  toast: true },  // → renter (paid after the booking closed)
   PAYMENT_RECEIVED:         { email: true,  toast: true },  // → owner (escrow funded, hand over)
   PAYMENT_CONFIRMED:        { email: false, toast: true },  // → renter (receipt of their own action)
   HANDOVER_STARTED:         { email: true,  toast: true },  // → renter (1-hour inspection window)
   RENT_RELEASED:            { email: false, toast: true },  // → owner
-  HANDOVER_ISSUE_REPORTED:  { email: true,  toast: true },  // → owner (dispute opened)
+  HANDOVER_ISSUE_REPORTED:  { email: true,  toast: true },  // → owner (accept or contest within 24h)
+  HANDOVER_ISSUE_CONTESTED: { email: true,  toast: true },  // → renter (sent to admin)
   RETURN_INITIATED:         { email: true,  toast: true },  // → owner (confirm receipt)
   RETURN_RECEIVED:          { email: false, toast: true },  // → renter (2-hour owner inspection)
   RETURN_NOT_RECEIVED:      { email: true,  toast: true },  // → renter (dispute opened)

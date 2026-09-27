@@ -11,12 +11,45 @@ const chatHistoryMessageSchema = z.object({
   signature: z.string().max(128).optional(),
 });
 
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/**
+ * Conversation memory echoed back by the chat. It only holds search criteria
+ * and ids of public listings, so a tampered copy can't do more than change the
+ * search; it is still bounded and validated.
+ */
+const conciergeContextSchema = z.object({
+  v: z.literal(1),
+  lastIntent: z.enum([
+    "listing_inquiry", "damage_inquiry", "policy_question", "negotiation_inquiry", "payment_escrow_inquiry", "general_faq",
+  ]).optional(),
+  lastUserMessage: z.string().max(2000).optional(),
+  search: z.object({
+    items: z.array(z.object({
+      key: z.string().max(60),
+      quantity: z.number().int().positive().max(1_000_000).optional(),
+      inferred: z.boolean().optional(),
+    })).max(10),
+    guests: z.number().int().positive().max(1_000_000).optional(),
+    location: z.object({ label: z.string().max(80), city: z.string().max(60).optional() }).optional(),
+    budget: z.object({
+      amountPaise: z.number().int().positive().max(1e13),
+      basis: z.enum(["total", "per_day"]),
+      perUnit: z.boolean(),
+    }).optional(),
+    startDate: isoDay.optional(),
+    endDate: isoDay.optional(),
+  }).optional(),
+  resultIds: z.array(z.string().max(40)).max(20).optional(),
+});
+
 const conciergeQuerySchema = z.object({
   message: z.string().min(1, "Message cannot be empty").max(2000, "Message too long"),
   history: z.array(chatHistoryMessageSchema).max(50).optional(),
   date: z.string().max(40).optional(),
   location: z.string().max(100).optional(),
   quantity: z.number().int().positive().max(100000).optional(),
+  context: conciergeContextSchema.optional(),
 });
 
 export class AiController {
@@ -39,6 +72,7 @@ export class AiController {
         date: parsedBody.date,
         location: parsedBody.location,
         quantity: parsedBody.quantity,
+        context: parsedBody.context,
       });
 
       res.status(200).json({

@@ -1,3 +1,5 @@
+import type { ConciergeContext } from "./conversation.js";
+
 export interface ChatHistoryMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -11,6 +13,8 @@ export interface RagQueryInput {
   date?: string;
   location?: string;
   quantity?: number;
+  /** Conversation memory returned by the previous reply (search criteria + listings shown) */
+  context?: ConciergeContext;
 }
 
 export type KnowledgeCategory = 
@@ -53,9 +57,20 @@ export interface ResourceResultCard {
   capacity: string;
   quantityAvailable: number;
   unit: string;
-  rating: number;
+  /** Average renter rating of the owner; null when there are no reviews yet (never invented). */
+  rating: number | null;
   reviewCount: number;
+  /** % of the requested quantity this listing can supply by itself (100 when no quantity was asked). */
   match: number;
+  /** Which requested item this card answers, e.g. "chairs" */
+  matchedFor: string;
+  requestedQuantity: number | null;
+  /** Human-readable fit, e.g. "Has 20 of the 30 chairs you need on 28 Oct 2026" */
+  fitLabel: string;
+  /** MATCH = meets every criterion asked; ALTERNATIVE = right item but e.g. another city or over budget */
+  tier: "MATCH" | "ALTERNATIVE";
+  /** Every way this listing misses the request, e.g. "Not in Pune — in Mumbai", "Over your ₹50,000 budget by ₹5,000" */
+  caveats: string[];
   available: boolean;
   category: string;
   categoryColor: string;
@@ -82,4 +97,6 @@ export interface RagResponse {
   sources: string[];
   suggestedFollowUps: string[];
   referencedPolicies?: string[];
+  /** Send this back with the next message so follow-ups are understood */
+  context?: ConciergeContext;
 }

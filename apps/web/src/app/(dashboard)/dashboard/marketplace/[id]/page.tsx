@@ -26,7 +26,7 @@ interface CalendarData { availableWindows: AvailWindow[]; bookedRanges: BookedRa
 
 interface Reputation {
   asOwnerRating: number | null; asOwnerReviewCount: number;
-  resourcesGiven: number; resourcesTaken: number; completedBookings: number;
+  resourcesGiven: number; resourcesTaken: number; completedBookings: number; ownerCancellations: number;
   recentReviews: {
     rating: number; reviewerRole: string; comment: string | null; createdAt: string;
     reviewer: { id: string; name: string; businessType: string | null; city: string | null };
@@ -48,7 +48,10 @@ interface ResourceDetail {
 // ─── Mini calendar ────────────────────────────────────────────
 const WEEKDAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-function isoDate(d: Date) { return d.toISOString().split("T")[0]; }
+/** "YYYY-MM-DD" for the user's local calendar day (toISOString would give the UTC day). */
+function isoDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 function MiniCalendar({ resourceId }: { resourceId: string }) {
   const now = new Date();
@@ -194,6 +197,12 @@ function OwnerCard({ businessId, businessName, city, state, businessType }: {
             ))}
           </div>
 
+          {rep.ownerCancellations > 0 && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+              This owner cancelled {rep.ownerCancellations} accepted booking{rep.ownerCancellations === 1 ? "" : "s"} (renters were refunded in full).
+            </p>
+          )}
+
           {rep.recentReviews.length > 0 && (
             <div className="rounded-xl border border-stone-100 bg-stone-50 p-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-1.5">Latest Review</p>
@@ -238,9 +247,10 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
   const [success, setSuccess]   = useState<"booked" | "negotiated" | null>(null);
   const [error, setError]       = useState("");
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = isoDate(new Date());
+  // Both dates are inclusive: the 3rd to the 3rd is a one-day rental
   const totalDays = start && end
-    ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000))
+    ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1)
     : null;
 
   const listedPerDay    = resource.rentAmountPaise / 100;
@@ -271,8 +281,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceId: resource.id, quantity: qty,
-          startDate: new Date(start + "T00:00:00").toISOString(),
-          endDate:   new Date(end   + "T00:00:00").toISOString(),
+          startDate: start, // calendar days, inclusive
+          endDate:   end,
           specialRequests: notes || undefined,
           transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
           transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
@@ -302,8 +312,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceId: resource.id, quantity: qty,
-          startDate: new Date(start + "T00:00:00").toISOString(),
-          endDate:   new Date(end   + "T00:00:00").toISOString(),
+          startDate: start, // calendar days, inclusive
+          endDate:   end,
           specialRequests: notes || undefined,
           transportMode: usingOwnerTransport ? "PROVIDER" : "SELF",
           transportDistanceKm: usingOwnerTransport ? distanceKm : undefined,
