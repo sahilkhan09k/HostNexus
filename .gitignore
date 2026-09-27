@@ -123,6 +123,8 @@ temp/
 context/
 specs/
 Six-File+Context+Methodology/
+# Local Nugen alignment and benchmark drafts
+/docs/nugen/
 
 # ─── User uploads (KYC docs, photos) ────
 apps/api/uploads/*
