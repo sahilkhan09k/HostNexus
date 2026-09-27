@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, type Easing } from "framer-motion";
 import {
@@ -8,12 +8,13 @@ import {
   CalendarDays, LogOut, Eye, ChevronDown, ChevronUp,
   ExternalLink, AlertTriangle, RefreshCw, Loader2, X, FileText,
 } from "lucide-react";
-import { AdminAuthService, type PendingUser, type AdminSummary } from "@/lib/admin-auth";
+import { AdminAuthService, type AdminUser, type PendingUser, type AdminSummary } from "@/lib/admin-auth";
 import { cn } from "@/lib/utils";
+import { DisputesPanel } from "./disputes-panel";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
-type Tab = "PENDING" | "VERIFIED" | "REJECTED";
+type Tab = "PENDING" | "VERIFIED" | "REJECTED" | "DISPUTES";
 type ActionState = { id: string; type: "approve" | "reject" } | null;
 
 const STATUS_CONFIG: Record<"PENDING" | "VERIFIED" | "REJECTED", {
@@ -46,6 +47,17 @@ function StatCard({ label, value, icon: Icon, color, bg }: {
 
 function DocLink({ url, label }: { url: string | null; label: string }) {
   if (!url) return <span className="text-xs text-stone-400 italic">Not provided</span>;
+
+  if (url.startsWith("/kyc/")) {
+    return (
+      <button
+        type="button"
+        onClick={() => AdminAuthService.openKycDocument(url).catch((err) => alert(err instanceof Error ? err.message : "Could not open document"))}
+        className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-all">
+        <FileText className="h-3 w-3" /> {label} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+      </button>
+    );
+  }
 
   // If it's a server-relative URL, prepend the API base
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -198,14 +210,25 @@ function UserRow({
                     <DocLink url={user.gstCertificateUrl} label="View GST Doc" />
                   </div>
                   <div>
-                    <p className="mb-1 text-xs font-medium text-stone-600">Aadhaar / Udyam</p>
-                    <DocLink url={user.aadhaarUrl} label="View Aadhaar" />
+                    <p className="mb-1 text-xs font-medium text-stone-600">GSTIN</p>
+                    {user.gstin ? (
+                      <>
+                        <p className="font-mono text-xs text-stone-800">{user.gstin}</p>
+                        {(user.gstLegalName || user.gstTradeName) && (
+                          <p className="mt-1 text-[11px] text-stone-500">
+                            Registry: {[user.gstLegalName, user.gstTradeName].filter(Boolean).join(" / ")}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <DocLink url={user.aadhaarUrl} label="View Aadhaar" />
+                    )}
                   </div>
                 </div>
 
                 {user.verificationNotes && (
                   <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-rose-600">Rejection Reason</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-rose-600">Verification Notes</p>
                     <p className="mt-1 text-xs text-rose-700">{user.verificationNotes}</p>
                   </div>
                 )}
@@ -276,9 +299,31 @@ function RejectModal({
   );
 }
 
+const subscribeToStorage = (onChange: () => void) => {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+};
+
+/**
+ * Admin profile from localStorage. The server snapshot is null, so the first client
+ * render matches the server HTML (no hydration mismatch); React then re-renders with
+ * the stored profile. Also follows logins/logouts in other tabs.
+ */
+function useAdminProfile(): AdminUser | null {
+  const raw = useSyncExternalStore(subscribeToStorage, AdminAuthService.getAdminJson, () => null);
+  return useMemo(() => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AdminUser;
+    } catch {
+      return null;
+    }
+  }, [raw]);
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const [admin, setAdmin] = useState(AdminAuthService.getAdmin());
+  const admin = useAdminProfile();
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [users, setUsers] = useState<PendingUser[]>([]);
   const [tab, setTab] = useState<Tab>("PENDING");
@@ -293,10 +338,10 @@ export default function AdminDashboardPage() {
     if (!AdminAuthService.isLoggedIn()) router.replace("/admin/login");
   }, [router]);
 
-  const showToast = (msg: string, type: "success" | "error") => {
+  const showToast = useCallback((msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
-  };
+  }, []);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -304,7 +349,7 @@ export default function AdminDashboardPage() {
     try {
       const [sum, userList] = await Promise.all([
         AdminAuthService.getSummary(),
-        AdminAuthService.getUsers(tab),
+        tab === "DISPUTES" ? Promise.resolve([] as PendingUser[]) : AdminAuthService.getUsers(tab),
       ]);
       setSummary(sum);
       setUsers(userList);
@@ -350,8 +395,8 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    AdminAuthService.clearAdmin();
+  const handleLogout = async () => {
+    await AdminAuthService.logout();
     router.push("/admin/login");
   };
 
@@ -359,6 +404,7 @@ export default function AdminDashboardPage() {
     { key: "PENDING",  label: "Pending Review", count: summary?.pending },
     { key: "VERIFIED", label: "Verified",        count: summary?.verified },
     { key: "REJECTED", label: "Rejected",        count: summary?.rejected },
+    { key: "DISPUTES", label: "Disputes",        count: summary?.openDisputes },
   ];
 
   return (
@@ -486,8 +532,10 @@ export default function AdminDashboardPage() {
           ))}
         </div>
 
-        {/* User list */}
-        {loading ? (
+        {/* User list / disputes */}
+        {tab === "DISPUTES" ? (
+          <DisputesPanel onChanged={() => loadData(true)} showToast={showToast} />
+        ) : loading ? (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-20 animate-pulse rounded-2xl bg-stone-100" />

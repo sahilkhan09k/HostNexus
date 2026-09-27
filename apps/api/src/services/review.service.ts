@@ -1,5 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
+import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
+import { notifyReviewReceived } from "./notifications/account-notifications.js";
 
 export interface SubmitReviewInput {
   bookingId: string;
@@ -93,26 +95,22 @@ export class ReviewService {
     input: SubmitReviewInput
   ) {
     if (input.rating < 1 || input.rating > 5) {
-      throw new Error("Rating must be between 1 and 5");
+      throw unprocessable("Rating must be between 1 and 5", "INVALID_RATING");
     }
 
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("You must have a business to submit a review");
+    if (!business) throw forbidden("You must have a business to submit a review", "NO_BUSINESS");
 
     const booking = await prisma.bookingRequest.findUnique({
       where: { id: input.bookingId },
       include: { seeker: true, provider: true },
     });
-    if (!booking) throw new Error("Booking not found");
+    const isSeeker   = booking?.seekerId   === business.id;
+    const isProvider = booking?.providerId === business.id;
+
+    if (!booking || (!isSeeker && !isProvider)) throw notFound("Booking not found");
     if (booking.bookingStatus !== "COMPLETED") {
-      throw new Error("Reviews can only be submitted for completed bookings");
-    }
-
-    const isSeeker   = booking.seekerId   === business.id;
-    const isProvider = booking.providerId === business.id;
-
-    if (!isSeeker && !isProvider) {
-      throw new Error("You were not a party to this booking");
+      throw conflict("Reviews can only be submitted for completed bookings", "BOOKING_NOT_COMPLETED");
     }
 
     // Reviewer role = hat they wore in THIS booking
@@ -120,15 +118,18 @@ export class ReviewService {
     // Subject = the other party
     const subjectId    = isSeeker ? booking.providerId : booking.seekerId;
 
+    const reviewKey = {
+      bookingId_reviewerId_reviewerRole: {
+        bookingId:    input.bookingId,
+        reviewerId:   business.id,
+        reviewerRole,
+      },
+    };
+    const isNew = !(await prisma.review.findUnique({ where: reviewKey, select: { id: true } }));
+
     // Upsert — idempotent if they try to re-submit
     const review = await prisma.review.upsert({
-      where: {
-        bookingId_reviewerId_reviewerRole: {
-          bookingId:    input.bookingId,
-          reviewerId:   business.id,
-          reviewerRole,
-        },
-      },
+      where: reviewKey,
       update: {
         rating:  input.rating,
         comment: input.comment ?? null,
@@ -142,6 +143,9 @@ export class ReviewService {
         comment:      input.comment ?? null,
       },
     });
+
+    // Only a first review is news to the other party; edits stay silent
+    if (isNew) void notifyReviewReceived(review.id);
 
     return review;
   }
@@ -162,10 +166,17 @@ export class ReviewService {
   static async getBusinessProfile(businessId: string) {
     const business = await prisma.business.findUnique({
       where: { id: businessId },
-      include: {
-        owner: { select: { id: true, ownerName: true, phone: true, verificationStatus: true } },
+      select: {
+        id: true,
+        name: true,
+        businessType: true,
+        city: true,
+        state: true,
+        createdAt: true,
+        // Public endpoint: no personal contact details (phone, user id) of the owner
+        owner: { select: { verificationStatus: true } },
         resources: {
-          where: { isActive: true },
+          where: { isActive: true, deletedAt: null },
           select: {
             id: true, name: true, resourceType: true,
             rentAmountPaise: true, location: true, photos: true,
@@ -174,7 +185,7 @@ export class ReviewService {
         },
       },
     });
-    if (!business) throw new Error("Business not found");
+    if (!business) throw notFound("Business not found");
 
     const reputation = await getBusinessReputation(businessId);
 

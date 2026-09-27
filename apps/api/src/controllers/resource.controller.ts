@@ -1,6 +1,7 @@
-﻿import type { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { ResourceService } from "../services/resource.service.js";
 import { createResourceSchema, updateResourceSchema, resourceQuerySchema } from "../schemas/resource.schema.js";
+import { paginationSchema } from "../utils/pagination.js";
 
 export class ResourceController {
   /**
@@ -207,6 +208,7 @@ export class ResourceController {
       }
 
       const query = resourceQuerySchema.parse(req.query);
+      const page = paginationSchema.parse({ limit: req.query.limit, cursor: req.query.cursor });
 
       // Resolve caller's own businessId so we can exclude their listings
       let excludeBusinessId: string | undefined;
@@ -216,16 +218,17 @@ export class ResourceController {
         excludeBusinessId = biz?.id;
       } catch { /* non-fatal */ }
 
-      const resources = await ResourceService.getAllResources(
+      const { items: resources, nextCursor } = await ResourceService.getAllResources(
         {
           ...query,
           startDate: typeof req.query.startDate === "string" ? req.query.startDate : undefined,
           endDate:   typeof req.query.endDate   === "string" ? req.query.endDate   : undefined,
         },
-        excludeBusinessId
+        excludeBusinessId,
+        page
       );
 
-      res.status(200).json({ success: true, data: { resources, count: resources.length } });
+      res.status(200).json({ success: true, data: { resources, count: resources.length, nextCursor } });
     } catch (error) {
       next(error);
     }

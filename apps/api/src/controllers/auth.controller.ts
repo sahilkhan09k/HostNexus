@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
 import { AuthService } from "../services/auth.service.js";
-import { registerSchema, loginSchema } from "../schemas/auth.schema.js";
+import { audit } from "../services/audit.service.js";
+import { notifyKycEvent } from "../services/notifications/account-notifications.js";
+import { registerSchema, loginSchema, refreshSchema } from "../schemas/auth.schema.js";
+import { HttpError } from "../utils/http-error.js";
 
 export class AuthController {
   /** POST /api/auth/register */
@@ -8,11 +11,15 @@ export class AuthController {
     try {
       const input = registerSchema.parse(req.body);
       const result = await AuthService.register(input);
-      // 202 Accepted — account created but awaiting verification
-      res.status(202).json({
+      await audit({ action: "AUTH_REGISTER", actorType: "USER", actorId: result.user.id, req,
+        metadata: { autoVerified: result.autoVerified, gstin: result.gstin.gstin } });
+      void notifyKycEvent(result.user.id, { kind: result.autoVerified ? "AUTO_VERIFIED" : "SUBMITTED" });
+      res.status(201).json({
         success: true,
-        data: result,
-        message: "Account created. Awaiting admin verification.",
+        data: { user: result.user, gstin: result.gstin },
+        message: result.autoVerified
+          ? "GSTIN verified. Account created."
+          : "Account created. Your GST details are being reviewed by our team; you can sign in once approved.",
       });
     } catch (error) {
       next(error);
@@ -24,24 +31,37 @@ export class AuthController {
     try {
       const input = loginSchema.parse(req.body);
       const result = await AuthService.login(input);
+      await audit({ action: "AUTH_LOGIN_SUCCESS", actorType: "USER", actorId: result.user.id, req });
       res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        await audit({ action: "AUTH_LOGIN_FAILED", actorType: "ANONYMOUS", req,
+          metadata: { reason: error.code, email: typeof req.body?.email === "string" ? req.body.email.slice(0, 254) : undefined } });
+      }
+      next(error);
+    }
+  }
+
+  /** POST /api/auth/refresh — rotates the refresh token */
+  static async refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { refreshToken } = refreshSchema.parse(req.body);
+      const tokens = await AuthService.refreshTokens(refreshToken);
+      res.status(200).json({ success: true, data: { token: tokens.accessToken, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } });
     } catch (error) {
       next(error);
     }
   }
 
-  /** POST /api/auth/refresh */
-  static async refresh(req: Request, res: Response): Promise<void> {
+  /** POST /api/auth/logout — revokes the session the refresh token belongs to */
+  static async logout(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { refreshToken } = req.body as { refreshToken?: string };
-      if (!refreshToken || typeof refreshToken !== "string") {
-        res.status(400).json({ success: false, error: { code: "MISSING_REFRESH_TOKEN", message: "refreshToken is required" } });
-        return;
-      }
-      const tokens = AuthService.refreshTokens(refreshToken);
-      res.status(200).json({ success: true, data: { token: tokens.accessToken, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } });
+      const { refreshToken } = refreshSchema.parse(req.body);
+      const userId = await AuthService.logout(refreshToken);
+      if (userId) await audit({ action: "AUTH_LOGOUT", actorType: "USER", actorId: userId, req });
+      res.status(200).json({ success: true, data: null });
     } catch (error) {
-      res.status(401).json({ success: false, error: { code: "INVALID_REFRESH_TOKEN", message: error instanceof Error ? error.message : "Invalid token" } });
+      next(error);
     }
   }
 

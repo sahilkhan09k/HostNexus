@@ -461,35 +461,41 @@ export interface BookingQuery {
 }
 
 // ─────────────────────────────────────────
-// Messaging
+// Notifications (REST /api/notifications + Socket.IO)
 // ─────────────────────────────────────────
 
-export interface Conversation {
-  id: string;
-  businessAId: string;
-  businessBId: string;
-  createdAt: string;
-  updatedAt: string;
+/** Ids the client needs to open the related object. `link` is an app-relative path. */
+export interface NotificationData {
+  link?: string;
+  bookingId?: string;
+  resourceId?: string;
+  businessId?: string;
+  reviewId?: string;
+  negotiationId?: string;
 }
 
-export interface Message {
+export interface AppNotification {
   id: string;
-  conversationId: string;
-  senderId: string;
-  content: string;
+  type: string;
+  title: string;
+  message: string;
+  data: NotificationData | null;
+  read: boolean;
   readAt: string | null;
   createdAt: string;
 }
 
-export interface MessageWithSender extends Message {
-  sender: {
-    id: string;
-    name: string;
-  };
+export interface NotificationListResponse {
+  notifications: AppNotification[];
+  count: number;
+  nextCursor: string | null;
+  unreadCount: number;
 }
 
-export interface ConversationWithMessages extends Conversation {
-  messages: MessageWithSender[];
-  businessA: { id: string; name: string };
-  businessB: { id: string; name: string };
+/** Server → client socket events */
+export interface RealtimeEvents {
+  "notification:new": { notification: AppNotification; toast: boolean };
+  "notification:read": { ids: string[]; all: boolean };
+  "booking:updated": { bookingId: string; event: string };
+  "negotiation:updated": { bookingId: string; event: string };
 }

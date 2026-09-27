@@ -16,7 +16,7 @@ interface AuthContextType {
   business: Business | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  /** Full KYC register — does NOT log the user in, redirects to /pending-verification */
+  /** Register with automated GSTIN KYC — does NOT log the user in; caller signs in next */
   register: (credentials: RegisterCredentials) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -100,8 +100,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * KYC registration — submits full credentials, does NOT issue tokens.
-   * Returns normally on 202; throws on validation / server error.
-   * Caller (register page) redirects to /pending-verification.
+   * Returns normally on 201; throws on validation / GSTIN / server error.
+   * Caller (register page) signs in afterwards.
    */
   const register = useCallback(async (credentials: RegisterCredentials) => {
     await AuthService.register(credentials);

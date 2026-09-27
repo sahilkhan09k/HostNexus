@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // HostNexus AuthService
 // Handles access token (15m) + refresh token (7d) lifecycle
-// Registration is now a 3-step KYC flow — no tokens on register,
-// account must be VERIFIED by admin before login is allowed.
+// Registration is a 3-step flow — the API reads and verifies the GSTIN
+// from the GST certificate, so the account is VERIFIED on creation.
 // ─────────────────────────────────────────────────────────────
 
 export interface SafeUser {
@@ -37,10 +37,10 @@ export interface AuthResponse {
   };
 }
 
-/** What the register endpoint returns — 202, no tokens */
+/** What the register endpoint returns — 201 once the GSTIN is verified, no tokens (sign in next) */
 export interface RegisterResponse {
   success: boolean;
-  data: { user: SafeUser };
+  data: { user: SafeUser; gstin: { gstin: string; legalName: string | null; tradeName: string | null; status: string | null } };
   message: string;
 }
 
@@ -56,7 +56,6 @@ export interface RegisterCredentials {
   state: string;
   pincode: string;
   gstCertificateUrl: string;
-  aadhaarUrl: string;
 }
 
 interface LoginCredentials {
@@ -94,6 +93,11 @@ function isTokenExpired(token: string): boolean {
 function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
+
+// Refresh tokens are single-use (rotated on every refresh). Concurrent requests
+// must share one refresh call, otherwise the second one presents an already-used
+// token and the API revokes the whole session as a suspected replay.
+let refreshInFlight: Promise<string | null> | null = null;
 
 // ─── AuthService ──────────────────────────────────────────────
 
@@ -153,7 +157,14 @@ export class AuthService {
 
   // ── Token refresh ─────────────────────────────────────────
 
-  static async refreshTokens(): Promise<string | null> {
+  static refreshTokens(): Promise<string | null> {
+    refreshInFlight ??= this.doRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
+  }
+
+  private static async doRefresh(): Promise<string | null> {
     const refreshToken = this.getRefreshToken();
     if (!refreshToken) return null;
     try {
@@ -162,7 +173,13 @@ export class AuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // Another tab may have rotated the token a moment ago (localStorage is shared)
+        const current = this.getRefreshToken();
+        const access = this.getAccessToken();
+        if (current && current !== refreshToken && access && !isTokenExpired(access)) return access;
+        return null;
+      }
       const data = await res.json();
       const { accessToken, refreshToken: newRefreshToken } = data.data;
       this.setTokens(accessToken, newRefreshToken);
@@ -170,6 +187,17 @@ export class AuthService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * A non-expired access token, refreshing it if needed. Returns null instead of
+   * redirecting — used by background connections (realtime socket) that must not
+   * navigate the page on their own.
+   */
+  static async getValidAccessToken(): Promise<string | null> {
+    const accessToken = this.getAccessToken();
+    if (accessToken && !isTokenExpired(accessToken)) return accessToken;
+    return this.refreshTokens();
   }
 
   // ── Authenticated fetch wrapper ───────────────────────────
@@ -262,8 +290,8 @@ export class AuthService {
   }
 
   /**
-   * Register — sends the full KYC payload, returns 202 (no tokens).
-   * Caller is responsible for redirecting to /pending-verification.
+   * Register — sends the GST certificate; the API verifies the GSTIN and returns 201 (no tokens).
+   * Caller signs in afterwards.
    */
   static async register(credentials: RegisterCredentials): Promise<RegisterResponse> {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
@@ -281,12 +309,23 @@ export class AuthService {
       );
     }
 
-    // 202 — pending verification, no tokens issued
+    // 201 — account created; VERIFIED if the GST details matched, otherwise PENDING review
     return response.json() as Promise<RegisterResponse>;
   }
 
+  /** Revokes the session server-side, then clears local state. */
   static logout(): void {
+    const refreshToken = this.getRefreshToken();
     this.clearAuth();
+    if (refreshToken) {
+      // Best effort — local tokens are already gone either way
+      fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+        keepalive: true,
+      }).catch(() => {});
+    }
     if (isBrowser()) window.location.href = "/login";
   }
 

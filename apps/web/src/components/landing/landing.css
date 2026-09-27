@@ -48,40 +48,29 @@
  * stagger, starting after their section has begun to appear. --i is the item's
  * position; --hn-stagger-step sets the gap between items.
  */
-.hn-reveal :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 0; }
-.hn-reveal.is-visible :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * {
+.hn-reveal :is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 0; }
+.hn-reveal.is-visible :is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * {
   opacity: 1;
   animation: hn-card-in 800ms var(--hn-ease-out) backwards;
   animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
 }
-:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(2) { --i: 1; }
-:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(3) { --i: 2; }
-:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(4) { --i: 3; }
-:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(5) { --i: 4; }
-:is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(n+6) { --i: 5; }
+:is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(2) { --i: 1; }
+:is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(3) { --i: 2; }
+:is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(4) { --i: 3; }
+:is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(5) { --i: 4; }
+:is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > :nth-child(n+6) { --i: 5; }
 .hn-steps { --hn-stagger-step: 180ms; }
 .hn-guarantees__list { --hn-stagger-base: 700ms; --hn-stagger-step: 80ms; }
 .hn-chat__messages { --hn-stagger-base: 750ms; --hn-stagger-step: 450ms; }
 
-/* Resource cards: the photo wipes up inside its frame and settles from a slight zoom. */
-.hn-reveal.is-visible .hn-resource-grid .hn-resource-card__frame {
-  animation: hn-frame-wipe 900ms var(--hn-ease-out) backwards;
-  animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
-}
-.hn-reveal.is-visible .hn-resource-grid .hn-visual__img {
-  animation: hn-photo-settle 1200ms var(--hn-ease-out) backwards;
-  animation-delay: calc(var(--hn-stagger-base, 450ms) + var(--i, 0) * var(--hn-stagger-step, 100ms));
-}
+/* Bento grid reveals as one block; its photos settle from a slight zoom as it lands. */
+.hn-reveal.is-visible .hn-bento .hn-visual__img { animation: hn-photo-settle 1400ms var(--hn-ease-out) 300ms backwards; }
 /* Testimonials swap with a short rise. */
 .hn-reveal.is-visible .hn-testimonial { animation: hn-card-in 600ms var(--hn-ease-out) backwards; }
 
 @keyframes hn-card-in {
   from { opacity: 0; transform: translateY(40px) scale(.96); }
   to { opacity: 1; transform: none; }
-}
-@keyframes hn-frame-wipe {
-  from { clip-path: inset(100% 0 0 0 round var(--hn-radius-lg)); }
-  to { clip-path: inset(0 0 0 0 round var(--hn-radius-lg)); }
 }
 @keyframes hn-photo-settle {
   from { transform: scale(1.15); }
@@ -163,11 +152,23 @@
   font: 600 var(--hn-text-wordmark)/0.9 var(--hn-font-sans); letter-spacing: -0.05em;
   white-space: nowrap; pointer-events: none;
 }
-.hn-hero__wordmark span {
+.hn-hero__wordmark-text { filter: drop-shadow(0 4px 24px rgba(0, 0, 0, .25)); }
+.hn-hero__wordmark-char {
+  display: inline-block;
+  /* Negative tracking leaves glyphs wider than their box, and background-clip:text
+     only paints inside the box: pad it out so edges (like the final "s") are not cut,
+     then pull the margins back so the spacing is unchanged. */
+  padding: 0 0.1em; margin: 0 -0.1em;
   /* Bright at the top, fading into the photo so the copy below stays readable */
   background: linear-gradient(180deg, rgba(255, 255, 255, .62) 0%, rgba(255, 255, 255, .34) 55%, rgba(255, 255, 255, .1) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 4px 24px rgba(0, 0, 0, .25));
+  /* Staggered reveal on load: one letter every 70ms */
+  animation: hn-wordmark-char-in 1100ms var(--hn-ease-out) calc(120ms + var(--i) * 70ms) both;
+}
+@keyframes hn-wordmark-char-in {
+  from { opacity: 0; filter: blur(14px); transform: translateY(0.35em) scale(0.92); }
+  60% { opacity: 1; }
+  to { opacity: 1; filter: none; transform: none; }
 }
 /*
  * Top bar: fixed over the page so the nav is always reachable. Transparent over
@@ -317,26 +318,52 @@
 .hn-pill:focus-visible { outline: none; box-shadow: var(--hn-ring-focus); }
 .hn-pill.is-active { background: var(--hn-ink-900); border-color: var(--hn-ink-900); color: var(--hn-white); font-weight: 500; }
 
-.hn-resource-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 20px; }
-@media (max-width: 1024px) { .hn-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .hn-resource-grid { grid-template-columns: minmax(0, 1fr); } }
-.hn-resource-card { display: flex; flex-direction: column; gap: 16px; color: inherit; text-decoration: none; animation: hn-fade var(--hn-dur-base) var(--hn-ease-out); }
-.hn-resource-card__frame { position: relative; height: 240px; border-radius: var(--hn-radius-lg); overflow: hidden; }
-.hn-resource-card__zoom { position: absolute; inset: 0; transition: transform var(--hn-dur-slow) var(--hn-ease-out); }
-.hn-resource-card:hover .hn-resource-card__zoom { transform: scale(1.04); }
-.hn-resource-card__tag { position: absolute; top: 14px; left: 14px; }
-.hn-resource-card__status { position: absolute; top: 14px; right: 14px; }
-.hn-resource-card__body { display: flex; flex-direction: column; gap: 6px; }
-.hn-resource-card__business { font: 400 12px var(--hn-font-sans); color: var(--hn-text-muted); }
-.hn-resource-card__title { font: 500 20px/1.2 var(--hn-font-sans); letter-spacing: var(--hn-tracking-heading); color: var(--hn-text-strong); }
-.hn-resource-card__desc {
-  margin: 0; font: 400 13px/1.55 var(--hn-font-sans); color: var(--hn-text-body);
+/*
+ * Bento grid (design system "featured destinations"): groups of three, one
+ * feature tile beside two stacked tiles; every other group mirrors.
+ */
+.hn-bento { display: flex; flex-direction: column; gap: 16px; animation: hn-fade var(--hn-dur-base) var(--hn-ease-out); }
+.hn-bento__group { display: grid; gap: 16px; }
+.hn-bento__group--3 { grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); grid-template-rows: 290px 290px; }
+.hn-bento__group--3 > .is-feature { grid-row: 1 / 3; }
+.hn-bento__group--3.is-flipped { grid-template-columns: minmax(0, 1fr) minmax(0, 1.85fr); }
+.hn-bento__group--3.is-flipped > .is-feature { grid-column: 2; }
+.hn-bento__group--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 360px; }
+.hn-bento__group--1 { grid-template-rows: 460px; }
+
+.hn-bento__card { height: 100%; }
+/* A touch deeper than --overlay-photo so the extra meta rows stay legible */
+.hn-bento__scrim { background: linear-gradient(180deg, rgba(11, 13, 17, .18) 0%, rgba(11, 13, 17, 0) 26%, rgba(11, 13, 17, 0) 34%, rgba(11, 13, 17, .84) 100%); }
+.hn-bento__chips {
+  position: absolute; top: 16px; left: 16px; right: 16px;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+}
+.hn-dest-card--lg .hn-bento__chips { top: 22px; left: 24px; right: 24px; }
+.hn-bento__business { font: 400 12px var(--hn-font-sans); color: rgba(255, 255, 255, .82); }
+.hn-dest-card--lg .hn-bento__business { font-size: 13px; }
+.hn-dest-card--lg .hn-dest-card__title { font-size: clamp(28px, 2.6vw, 40px); line-height: 1.05; }
+.hn-bento__desc {
+  margin: 0; max-width: 46ch; font: 400 14px/1.55 var(--hn-font-sans); color: rgba(255, 255, 255, .78);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.hn-resource-card__meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 2px; }
-.hn-resource-card__footer {
-  display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 14px;
-  border-top: 1px solid var(--hn-border-default);
+.hn-bento__action { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; flex-shrink: 0; }
+.hn-bento__price { font: 500 18px/1 var(--hn-font-sans); letter-spacing: var(--hn-tracking-heading); color: var(--hn-white); white-space: nowrap; }
+.hn-bento__price small { margin-left: 2px; font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, .72); }
+.hn-dest-card--lg .hn-bento__price { font-size: 24px; }
+/* Arrow chip turns 45° on hover, per the design system */
+.hn-bento__card .hn-icon-btn { transition: transform var(--hn-dur-base) var(--hn-ease-out), background var(--hn-dur-fast) var(--hn-ease-out); }
+.hn-bento__card:hover .hn-icon-btn { transform: rotate(45deg); }
+.hn-bento__card:focus-visible { outline: none; box-shadow: var(--hn-ring-focus); }
+
+@media (max-width: 1024px) {
+  .hn-bento__group--3, .hn-bento__group--3.is-flipped { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 380px 280px; }
+  .hn-bento__group--3 > .is-feature, .hn-bento__group--3.is-flipped > .is-feature { grid-row: 1; grid-column: 1 / 3; }
+}
+@media (max-width: 640px) {
+  .hn-bento__group--3, .hn-bento__group--3.is-flipped, .hn-bento__group--2 { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: 340px; }
+  .hn-bento__group--3 > .is-feature, .hn-bento__group--3.is-flipped > .is-feature { grid-column: 1; }
+  .hn-bento__group--1 { grid-template-rows: 380px; }
+  .hn-dest-card__meta .hn-meta:nth-child(2), .hn-bento__desc { display: none; }
 }
 
 /* ── How it works ─────────────────────────── */
@@ -480,8 +507,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hn-reveal > *,
-  .hn-reveal :is(.hn-resource-grid, .hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 1 !important; animation: none !important; }
-  .hn-reveal.is-visible :is(.hn-cta__img, .hn-resource-card__frame, .hn-visual__img, .hn-testimonial) { animation: none !important; }
-  .hn-hero__img, .hn-hero__copy > *, .hn-hero__preview { animation: none; }
-  .hn-resource-card:hover .hn-resource-card__zoom { transform: none; }
+  .hn-reveal :is(.hn-steps, .hn-stats, .hn-guarantees__list, .hn-feature-list, .hn-chat__messages) > * { opacity: 1 !important; animation: none !important; }
+  .hn-reveal.is-visible :is(.hn-cta__img, .hn-visual__img, .hn-testimonial) { animation: none !important; }
+  .hn-bento, .hn-bento__card .hn-icon-btn { animation: none; transition: none; }
+  .hn-hero__img, .hn-hero__copy > *, .hn-hero__preview, .hn-hero__wordmark-char { animation: none; }
+  .hn-bento__card:hover .hn-icon-btn { transform: none; }
 }

@@ -5,6 +5,8 @@ import "./globals.css";
 import "@/components/ds/ds.css";
 import { AuthProvider } from "@/contexts/auth-context";
 import { LenisProvider } from "@/components/effects/lenis-provider";
+import { NotificationProvider } from "@/contexts/notification-context";
+import { NotificationToasts } from "@/components/notifications/notification-toasts";
 
 // HostNexus design system typeface (substitute for the source neo-grotesk)
 const interTight = Inter_Tight({
@@ -41,9 +43,13 @@ export default function RootLayout({ children }: LayoutProps) {
     >
       <body className="min-h-full bg-[#FAFAFA] text-[#131519] antialiased">
         <AuthProvider>
-          <LenisProvider>
-            {children}
-          </LenisProvider>
+          {/* Connects only for signed-in users; toasts show on any page */}
+          <NotificationProvider>
+            <LenisProvider>
+              {children}
+            </LenisProvider>
+            <NotificationToasts />
+          </NotificationProvider>
         </AuthProvider>
       </body>
     </html>

@@ -1,102 +1,257 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import jwt from "jsonwebtoken";
 
-vi.mock("../config/database.js", () => ({
-  prisma: {
+// ── In-memory stand-ins for the tables the auth service touches ─────────────
+const db = vi.hoisted(() => ({
+  users: new Map<string, any>(),
+  refreshTokens: new Map<string, any>(),
+}));
+
+vi.mock("../config/database.js", () => {
+  const matches = (row: any, where: any) =>
+    Object.entries(where).every(([k, v]) => (v === null ? row[k] == null : row[k] === v));
+  const prisma: any = {
     user: {
-      findUnique: vi.fn(),
+      findUnique: vi.fn(async ({ where }: any) => {
+        if (where.id) return db.users.get(where.id) ?? null;
+        return [...db.users.values()].find((u) => u.email === where.email || (where.gstin && u.gstin === where.gstin)) ?? null;
+      }),
+      update: vi.fn(async ({ where, data }: any) => {
+        const u = db.users.get(where.id);
+        if (data.tokenVersion?.increment) u.tokenVersion += data.tokenVersion.increment;
+        return u;
+      }),
       create: vi.fn(),
     },
-    business: {
-      create: vi.fn(),
+    refreshToken: {
+      create: vi.fn(async ({ data }: any) => {
+        db.refreshTokens.set(data.id, { ...data, revokedAt: null, replacedById: null });
+      }),
+      findUnique: vi.fn(async ({ where }: any) =>
+        [...db.refreshTokens.values()].find((t) => t.tokenHash === where.tokenHash) ?? null
+      ),
+      update: vi.fn(async ({ where, data }: any) => Object.assign(db.refreshTokens.get(where.id), data)),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const t of db.refreshTokens.values()) {
+          if (matches(t, where)) {
+            Object.assign(t, data);
+            count++;
+          }
+        }
+        return { count };
+      }),
     },
-    $transaction: vi.fn(),
+    auditLog: { create: vi.fn() },
+    $transaction: vi.fn(async (arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma))),
+  };
+  return { prisma };
+});
+
+vi.mock("../services/gstin.service.js", () => ({
+  GstinService: {
+    findKycUpload: vi.fn(),
+    extractFromDocument: vi.fn(),
+    verify: vi.fn(),
   },
 }));
 
-import { AuthService } from "../services/auth.service.js";
+import bcrypt from "bcrypt";
+import { AuthService, JWT_AUDIENCE, JWT_ISSUER } from "../services/auth.service.js";
+import { GstinService } from "../services/gstin.service.js";
+import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
 
-describe("AuthService Token Logic", () => {
-  const userId = "test-user-123";
+const userId = "test-user-123";
+const PASSWORD = "correct horse 42";
 
-  it("should generate a valid access token verified by verifyToken", () => {
-    // Generate access token
-    const token = jwt.sign({ sub: userId, type: "access" }, env.JWT_SECRET, {
-      expiresIn: "15m",
-    });
+async function seedUser(overrides: Partial<Record<string, unknown>> = {}) {
+  db.users.set(userId, {
+    id: userId,
+    email: "owner@example.com",
+    passwordHash: await bcrypt.hash(PASSWORD, 4),
+    ownerName: "Asha Patel",
+    phone: "9999999999",
+    verificationStatus: "VERIFIED",
+    tokenVersion: 0,
+    gstin: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  });
+}
 
-    const result = AuthService.verifyToken(token);
-    expect(result.sub).toBe(userId);
+beforeEach(async () => {
+  db.users.clear();
+  db.refreshTokens.clear();
+  vi.clearAllMocks();
+  await seedUser();
+});
+
+describe("Access tokens", () => {
+  it("issues access tokens that verifyToken accepts (HS256, issuer, audience, version)", async () => {
+    const { accessToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    expect(AuthService.verifyToken(accessToken)).toEqual({ sub: userId, ver: 0 });
+    const decoded = jwt.decode(accessToken, { complete: true }) as any;
+    expect(decoded.header.alg).toBe("HS256");
+    expect(decoded.payload.iss).toBe(JWT_ISSUER);
+    expect(decoded.payload.aud).toBe(JWT_AUDIENCE);
   });
 
-  it("should reject an access token if it has type refresh", () => {
-    const wrongTypeToken = jwt.sign({ sub: userId, type: "refresh" }, env.JWT_SECRET, {
-      expiresIn: "15m",
-    });
-
-    expect(() => AuthService.verifyToken(wrongTypeToken)).toThrow("Invalid or expired token");
+  it("rejects a refresh-type token, a token without type, and a token without issuer/audience", () => {
+    const opts = { expiresIn: "15m", issuer: JWT_ISSUER, audience: JWT_AUDIENCE } as const;
+    const refreshTyped = jwt.sign({ sub: userId, type: "refresh", ver: 0 }, env.JWT_SECRET, opts);
+    const untyped = jwt.sign({ sub: userId, ver: 0 }, env.JWT_SECRET, opts);
+    const noIssuer = jwt.sign({ sub: userId, type: "access", ver: 0 }, env.JWT_SECRET, { expiresIn: "15m" });
+    for (const t of [refreshTyped, untyped, noIssuer]) {
+      expect(() => AuthService.verifyToken(t)).toThrow("Invalid or expired token");
+    }
   });
 
-  it("should successfully refresh tokens with a valid 7-day refresh token", () => {
-    const refreshToken = jwt.sign({ sub: userId, type: "refresh" }, env.REFRESH_TOKEN_SECRET, {
-      expiresIn: "7d",
-    });
-
-    const refreshed = AuthService.refreshTokens(refreshToken);
-    expect(refreshed.userId).toBe(userId);
-    expect(typeof refreshed.accessToken).toBe("string");
-    expect(typeof refreshed.refreshToken).toBe("string");
-
-    // The newly issued access token must be verifiable by verifyToken
-    const verified = AuthService.verifyToken(refreshed.accessToken);
-    expect(verified.sub).toBe(userId);
-
-    // The newly issued refresh token must have 7-day expiry and type refresh
-    const decodedRefresh = jwt.decode(refreshed.refreshToken) as {
-      sub: string;
-      type: string;
-      exp: number;
-      iat: number;
-    };
-    expect(decodedRefresh.sub).toBe(userId);
-    expect(decodedRefresh.type).toBe("refresh");
-    // 7 days = 7 * 24 * 60 * 60 = 604800 seconds
-    expect(decodedRefresh.exp - decodedRefresh.iat).toBe(604800);
-
-    // The newly issued access token must have 15-min expiry
-    const decodedAccess = jwt.decode(refreshed.accessToken) as {
-      sub: string;
-      type: string;
-      exp: number;
-      iat: number;
-    };
-    expect(decodedAccess.sub).toBe(userId);
-    expect(decodedAccess.type).toBe("access");
-    // 15 min = 15 * 60 = 900 seconds
-    expect(decodedAccess.exp - decodedAccess.iat).toBe(900);
+  it("rejects tokens signed with the none algorithm", () => {
+    const none = jwt.sign({ sub: userId, type: "access", ver: 0, iss: JWT_ISSUER, aud: JWT_AUDIENCE }, "", { algorithm: "none" } as any);
+    expect(() => AuthService.verifyToken(none)).toThrow("Invalid or expired token");
   });
 
-  it("should throw when trying to refresh with an invalid or expired refresh token", () => {
-    // Tampered token
-    expect(() => AuthService.refreshTokens("invalid.token.here")).toThrow(
-      "Invalid or expired refresh token"
-    );
+  it("stops accepting a user's access token once the account is rejected (H-07)", async () => {
+    const { accessToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    await expect(AuthService.verifyAccessToken(accessToken)).resolves.toEqual({ sub: userId, ver: 0 });
 
-    // Expired token
-    const expiredToken = jwt.sign({ sub: userId, type: "refresh" }, env.REFRESH_TOKEN_SECRET, {
-      expiresIn: "-1s",
-    });
-    expect(() => AuthService.refreshTokens(expiredToken)).toThrow(
-      "Invalid or expired refresh token"
-    );
+    db.users.get(userId).verificationStatus = "REJECTED";
+    await expect(AuthService.verifyAccessToken(accessToken)).rejects.toMatchObject({ statusCode: 401, code: "SESSION_REVOKED" });
+  });
 
-    // Token signed with wrong secret (e.g. JWT_SECRET instead of REFRESH_TOKEN_SECRET)
-    const wrongSecretToken = jwt.sign({ sub: userId, type: "refresh" }, env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
-    expect(() => AuthService.refreshTokens(wrongSecretToken)).toThrow(
-      "Invalid or expired refresh token"
+  it("revokeAllSessions invalidates outstanding access tokens via tokenVersion", async () => {
+    const { accessToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    await AuthService.revokeAllSessions(userId);
+    await expect(AuthService.verifyAccessToken(accessToken)).rejects.toMatchObject({ code: "SESSION_REVOKED" });
+  });
+});
+
+describe("Refresh token rotation", () => {
+  it("rotates: returns a new pair and the old refresh token stops working", async () => {
+    const first = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    const second = await AuthService.refreshTokens(first.refreshToken);
+
+    expect(second.userId).toBe(userId);
+    expect(second.refreshToken).not.toBe(first.refreshToken);
+    expect(AuthService.verifyToken(second.accessToken).sub).toBe(userId);
+
+    // Replaying the rotated token is treated as theft
+    await expect(AuthService.refreshTokens(first.refreshToken)).rejects.toMatchObject({ code: "REFRESH_TOKEN_REUSED" });
+  });
+
+  it("reuse of an old token revokes the whole session family, including the newest token", async () => {
+    const first = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    const second = await AuthService.refreshTokens(first.refreshToken);
+
+    await expect(AuthService.refreshTokens(first.refreshToken)).rejects.toMatchObject({ code: "REFRESH_TOKEN_REUSED" });
+    await expect(AuthService.refreshTokens(second.refreshToken)).rejects.toMatchObject({ code: "REFRESH_TOKEN_REUSED" });
+  });
+
+  it("refuses to refresh for a rejected user (a banned session can't be extended forever)", async () => {
+    const { refreshToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    db.users.get(userId).verificationStatus = "REJECTED";
+    await expect(AuthService.refreshTokens(refreshToken)).rejects.toMatchObject({ statusCode: 401, code: "SESSION_REVOKED" });
+  });
+
+  it("logout revokes the session's refresh token", async () => {
+    const { refreshToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    await expect(AuthService.logout(refreshToken)).resolves.toBe(userId);
+    await expect(AuthService.refreshTokens(refreshToken)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects garbage, access tokens used as refresh tokens, and tokens never issued by us", async () => {
+    const { accessToken } = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    const forgedButValid = jwt.sign(
+      { sub: userId, type: "refresh", ver: 0, fam: "x" },
+      env.REFRESH_TOKEN_SECRET,
+      { issuer: JWT_ISSUER, audience: JWT_AUDIENCE, jwtid: "not-in-db", expiresIn: "7d" }
     );
+    for (const t of ["invalid.token.here", accessToken, forgedButValid]) {
+      await expect(AuthService.refreshTokens(t)).rejects.toMatchObject({ statusCode: 401 });
+    }
+  });
+});
+
+describe("Login", () => {
+  it("returns the same 401 for unknown email and wrong password, and still runs bcrypt for unknown emails (L-01)", async () => {
+    const compare = vi.spyOn(bcrypt, "compare");
+    const unknown = AuthService.login({ email: "nobody@example.com", password: PASSWORD });
+    await expect(unknown).rejects.toMatchObject({ statusCode: 401, code: "INVALID_CREDENTIALS", message: "Invalid email or password" });
+    const wrong = AuthService.login({ email: "owner@example.com", password: "wrong password 1" });
+    await expect(wrong).rejects.toMatchObject({ statusCode: 401, code: "INVALID_CREDENTIALS", message: "Invalid email or password" });
+    expect(compare).toHaveBeenCalledTimes(2);
+    compare.mockRestore();
+  });
+
+  it("never returns passwordHash or tokenVersion", async () => {
+    const res = await AuthService.login({ email: "owner@example.com", password: PASSWORD });
+    expect(res.user).not.toHaveProperty("passwordHash");
+    expect(res.user).not.toHaveProperty("tokenVersion");
+  });
+});
+
+describe("Registration KYC cross-check (H-05)", () => {
+  const input = {
+    email: "new@example.com",
+    password: "a strong pass 99",
+    ownerName: "Ravi Kumar",
+    phone: "9876543210",
+    businessName: "Sunrise Caterers",
+    businessType: "Caterer",
+    addressLine: "12 MG Road",
+    city: "Pune",
+    state: "Maharashtra",
+    pincode: "411001",
+    gstCertificateUrl: "/kyc/0b6c6f5e-1f1a-4c1e-9a55-0d2b1f0a9e11.pdf",
+  };
+
+  function captureCreatedUser() {
+    const created: any[] = [];
+    (prisma as any).user.create.mockImplementation(async ({ data }: any) => {
+      const u = { id: "new-user", createdAt: new Date(), updatedAt: new Date(), tokenVersion: 0, ...data };
+      created.push(u);
+      return u;
+    });
+    (prisma as any).business = { create: vi.fn() };
+    (prisma as any).upload = { updateMany: vi.fn().mockResolvedValue({ count: 1 }) };
+    return created;
+  }
+
+  beforeEach(() => {
+    (GstinService.findKycUpload as any).mockResolvedValue({ id: "0b6c6f5e-1f1a-4c1e-9a55-0d2b1f0a9e11.pdf", ownerId: null, purpose: "KYC" });
+    (GstinService.extractFromDocument as any).mockResolvedValue("27AAPFU0939F1ZV");
+  });
+
+  it("auto-verifies when the registry name and state match", async () => {
+    const created = captureCreatedUser();
+    (GstinService.verify as any).mockResolvedValue({ gstin: "27AAPFU0939F1ZV", legalName: "SUNRISE CATERERS PRIVATE LIMITED", tradeName: null, status: "Active" });
+    const res = await AuthService.register(input as any);
+    expect(res.autoVerified).toBe(true);
+    expect(created[0].verificationStatus).toBe("VERIFIED");
+  });
+
+  it("sends someone else's GSTIN to manual review instead of verifying it", async () => {
+    const created = captureCreatedUser();
+    (GstinService.verify as any).mockResolvedValue({ gstin: "27AAPFU0939F1ZV", legalName: "TAJ HOTELS LIMITED", tradeName: "TAJ", status: "Active" });
+    const res = await AuthService.register(input as any);
+    expect(res.autoVerified).toBe(false);
+    expect(created[0].verificationStatus).toBe("PENDING");
+    expect(created[0].verificationNotes).toContain("DOES NOT match");
+  });
+
+  it("sends a state mismatch to manual review", async () => {
+    const created = captureCreatedUser();
+    (GstinService.verify as any).mockResolvedValue({ gstin: "27AAPFU0939F1ZV", legalName: "SUNRISE CATERERS", tradeName: null, status: "Active" });
+    const res = await AuthService.register({ ...input, state: "Karnataka" } as any);
+    expect(res.autoVerified).toBe(false);
+    expect(created[0].verificationStatus).toBe("PENDING");
+  });
+
+  it("refuses a KYC document already bound to another account", async () => {
+    captureCreatedUser();
+    (GstinService.findKycUpload as any).mockResolvedValue({ id: "x.pdf", ownerId: "someone-else", purpose: "KYC" });
+    await expect(AuthService.register(input as any)).rejects.toMatchObject({ code: "GSTIN_DOCUMENT_INVALID" });
   });
 });

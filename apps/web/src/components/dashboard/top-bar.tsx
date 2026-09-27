@@ -1,39 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Search } from "lucide-react";
-import { AuthService } from "@/lib/auth";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+import { NotificationCenter } from "@/components/notifications/notification-center";
 
 export function TopBar() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
-  const [pendingCount, setPendingCount] = useState(0);
-
-  const fetchPendingCount = useCallback(async () => {
-    if (!AuthService.getAccessToken()) return;
-
-    try {
-      const res = await AuthService.fetchWithAuth(`${API_BASE_URL}/api/bookings?type=incoming`);
-      if (!res.ok) return;
-      const data = await res.json();
-      // Count bookings with status pending
-      const bookings: { status: string }[] = data?.data?.bookings ?? data?.data ?? [];
-      const pending = Array.isArray(bookings)
-        ? bookings.filter((b) => b.status?.toLowerCase() === "pending").length
-        : 0;
-      setPendingCount(pending);
-    } catch {
-      // silently ignore — badge simply won't show
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchPendingCount();
-  }, [fetchPendingCount]);
 
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" && searchQuery.trim()) {
@@ -61,22 +36,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          className={cn(
-            "relative flex h-9 w-9 items-center justify-center rounded-full",
-            "border border-stone-200 text-stone-400",
-            "transition-colors hover:bg-stone-50 hover:text-stone-600"
-          )}
-          aria-label={pendingCount > 0 ? `${pendingCount} pending notifications` : "Notifications"}
-        >
-          <Bell className="h-4 w-4" />
-          {pendingCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">
-              {pendingCount > 99 ? "99+" : pendingCount}
-            </span>
-          )}
-        </button>
+        <NotificationCenter />
       </div>
     </header>
   );

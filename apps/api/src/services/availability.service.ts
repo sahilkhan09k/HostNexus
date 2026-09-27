@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { CAPACITY_HOLDING_STATUSES, getCommittedQuantity } from "./capacity.js";
+import { badRequest, forbidden, notFound } from "../utils/http-error.js";
 
 export interface CreateWindowInput {
   fromDate: string; // ISO date string
@@ -23,11 +24,9 @@ async function getOverlappingBookings(resourceId: string, start: Date, end: Date
       endDate:   { gte: start },
     },
     select: {
-      id: true,
       startDate: true,
       endDate: true,
       bookingStatus: true,
-      seeker: { select: { id: true, name: true } },
     },
   });
 }
@@ -43,18 +42,18 @@ export class AvailabilityService {
     input: CreateWindowInput
   ) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found for this user");
+    if (!business) throw forbidden("No business found for this user", "NO_BUSINESS");
 
     const resource = await prisma.resource.findUnique({ where: { id: resourceId } });
-    if (!resource) throw new Error("Resource not found");
+    if (!resource) throw notFound("Resource not found");
     if (resource.businessId !== business.id)
-      throw new Error("Unauthorized: You can only manage your own resources");
+      throw forbidden("You can only manage your own resources");
 
     const from = new Date(input.fromDate);
     const to   = new Date(input.toDate);
     if (isNaN(from.getTime()) || isNaN(to.getTime()))
-      throw new Error("Invalid date format");
-    if (to < from) throw new Error("End date must be after start date");
+      throw badRequest("Invalid date format", "INVALID_DATES");
+    if (to < from) throw badRequest("End date must be after start date", "INVALID_DATES");
 
     return prisma.availabilityWindow.create({
       data: {
@@ -73,21 +72,21 @@ export class AvailabilityService {
     windows: CreateWindowInput[]
   ) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found for this user");
+    if (!business) throw forbidden("No business found for this user", "NO_BUSINESS");
 
     const resource = await prisma.resource.findUnique({ where: { id: resourceId } });
-    if (!resource) throw new Error("Resource not found");
+    if (!resource) throw notFound("Resource not found");
     if (resource.businessId !== business.id)
-      throw new Error("Unauthorized: You can only manage your own resources");
+      throw forbidden("You can only manage your own resources");
 
     // Validate all first
     const parsed = windows.map((w, i) => {
       const from = new Date(w.fromDate);
       const to   = new Date(w.toDate);
       if (isNaN(from.getTime()) || isNaN(to.getTime()))
-        throw new Error(`Window ${i + 1}: invalid date`);
+        throw badRequest(`Window ${i + 1}: invalid date`, "INVALID_DATES");
       if (to < from)
-        throw new Error(`Window ${i + 1}: end date must be after start date`);
+        throw badRequest(`Window ${i + 1}: end date must be after start date`, "INVALID_DATES");
       return { fromDate: from, toDate: to, note: w.note ?? null, resourceId };
     });
 
@@ -106,15 +105,15 @@ export class AvailabilityService {
   /** Delete a single window */
   static async deleteWindow(userId: string, windowId: string) {
     const business = await BusinessService.getBusinessByUserId(userId);
-    if (!business) throw new Error("No business found");
+    if (!business) throw forbidden("No business found", "NO_BUSINESS");
 
     const window = await prisma.availabilityWindow.findUnique({
       where: { id: windowId },
       include: { resource: true },
     });
-    if (!window) throw new Error("Window not found");
+    if (!window) throw notFound("Window not found");
     if (window.resource.businessId !== business.id)
-      throw new Error("Unauthorized");
+      throw forbidden("You can only manage your own resources");
 
     await prisma.availabilityWindow.delete({ where: { id: windowId } });
   }
@@ -146,13 +145,13 @@ export class AvailabilityService {
     const start = new Date(startDate);
     const end   = new Date(endDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()))
-      throw new Error("Invalid date format");
+      throw badRequest("Invalid date format", "INVALID_DATES");
 
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
       select: { id: true, quantity: true },
     });
-    if (!resource) throw new Error("Resource not found");
+    if (!resource) throw notFound("Resource not found");
 
     // 1. Does any window fully cover the request?
     const coveringWindow = await prisma.availabilityWindow.findFirst({
@@ -173,7 +172,7 @@ export class AvailabilityService {
         startDate: { lt: end },
         endDate:   { gt: start },
       },
-      select: { id: true, startDate: true, endDate: true, bookingStatus: true, quantity: true },
+      select: { startDate: true, endDate: true, bookingStatus: true, quantity: true },
     });
 
     const available = !!coveringWindow && availableQuantity >= quantity;
@@ -183,8 +182,8 @@ export class AvailabilityService {
       coveredByWindow: !!coveringWindow,
       totalQuantity: resource.quantity,
       availableQuantity,
+      // Public endpoint: never expose booking ids (they were the key to reading other bookings)
       conflicts: conflicts.map((b) => ({
-        bookingId: b.id,
         startDate: b.startDate,
         endDate:   b.endDate,
         status:    b.bookingStatus,
@@ -206,7 +205,7 @@ export class AvailabilityService {
    */
   static async getUnavailableDates(resourceId: string, month: string) {
     const [year, mon] = month.split("-").map(Number);
-    if (!year || !mon) throw new Error("month must be YYYY-MM format");
+    if (!year || !mon) throw badRequest("month must be YYYY-MM format", "INVALID_MONTH");
 
     const monthStart = new Date(year, mon - 1, 1);
     const monthEnd   = new Date(year, mon, 0, 23, 59, 59); // last day of month

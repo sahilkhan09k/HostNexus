@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/media";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
@@ -61,7 +62,7 @@ export function ResourceCard({ data, index = 0, onBook, onViewDetails }: Resourc
       <div className={cn("relative h-48 flex-shrink-0 overflow-hidden", data.imageBg)}>
         {primaryPhoto ? (
           <img
-            src={primaryPhoto}
+            src={mediaUrl(primaryPhoto)}
             alt={data.title}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />

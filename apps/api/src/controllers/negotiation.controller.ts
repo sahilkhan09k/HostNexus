@@ -3,7 +3,7 @@ import { z } from "zod";
 import { NegotiationService } from "../services/negotiation.service.js";
 
 const makeOfferSchema = z.object({
-  offeredAmountPaise: z.number().int().min(1, "Offer must be > 0"),
+  offeredAmountPaise: z.number().int().min(1, "Offer must be > 0").max(1_000_000_000),
   message: z.string().max(500).optional(),
 });
 
@@ -15,7 +15,7 @@ export class NegotiationController {
   /** GET /api/negotiations/:bookingId */
   static async get(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const neg = await NegotiationService.getByBookingId(String(req.params.bookingId));
+      const neg = await NegotiationService.getByBookingId(String(req.params.bookingId), req.userId!);
       res.status(200).json({ success: true, data: { negotiation: neg } });
     } catch (err) { next(err); }
   }

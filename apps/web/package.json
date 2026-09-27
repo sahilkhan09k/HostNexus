@@ -56,6 +56,7 @@
         "jsdom": "^29.1.1",
         "tailwindcss": "^4",
         "typescript": "^5",
+        "valibot": "^1.4.2",
         "vitest": "^4.1.11"
     }
 }

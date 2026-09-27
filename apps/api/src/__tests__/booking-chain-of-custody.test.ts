@@ -15,7 +15,19 @@ vi.mock("../config/database.js", () => ({
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       aggregate: vi.fn(),
+    },
+    negotiation: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn(),
+    },
+    negotiationOffer: {
+      updateMany: vi.fn(),
+    },
+    upload: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
     inspection: {
       create: vi.fn(),
@@ -48,6 +60,22 @@ vi.mock("../services/business.service.js", () => ({
     verifyOwnership: vi.fn(),
   },
 }));
+
+/**
+ * Minimal stateful stand-in for one booking row: findUnique returns it, a
+ * conditional updateMany applies `data` (count 1), findUniqueOrThrow returns
+ * the updated row — the same contract the real conditional updates rely on.
+ */
+function useBooking(initial: Record<string, any>) {
+  const row = { ...initial };
+  (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ ...row }));
+  (prisma.bookingRequest.updateMany as ReturnType<typeof vi.fn>).mockImplementation(async ({ data }: any) => {
+    Object.assign(row, data);
+    return { count: 1 };
+  });
+  (prisma.bookingRequest.findUniqueOrThrow as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ ...row }));
+  return row;
+}
 
 describe("Digital Chain of Custody & Dual State Machine", () => {
   const renterUserId = "user-renter";
@@ -130,6 +158,7 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
         BookingService.updateBookingStatus("book-p", ownerUserId, { status: "accepted" } as any)
       ).rejects.toThrow(/Only 40 of 100/);
       expect(prisma.bookingRequest.update).not.toHaveBeenCalled();
+      expect(prisma.bookingRequest.updateMany).not.toHaveBeenCalled();
 
       // The booking being accepted is excluded from its own committed total
       const where = (prisma.bookingRequest.aggregate as ReturnType<typeof vi.fn>).mock.calls[0][0].where;
@@ -139,9 +168,8 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
     it("accepts when the request still fits", async () => {
       committed(60);
       (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
-      (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(pending(40));
+      useBooking(pending(40));
       (prisma.resource.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(chairs);
-      (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...pending(40), ...data }));
 
       const updated = await BookingService.updateBookingStatus("book-p", ownerUserId, { status: "accepted" } as any);
       expect(updated.bookingStatus).toBe("BOOKING_ACCEPTED");
@@ -233,9 +261,8 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       financialStatus: "FUNDS_HELD",
     };
 
-    (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(bookingData);
+    useBooking(bookingData);
     (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
-    (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...bookingData, ...data }));
 
     const updated = await BookingService.markHandover("book-1", ownerUserId);
 
@@ -261,10 +288,9 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       quantity: 1,
     };
 
-    (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(bookingData);
+    useBooking(bookingData);
     (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(renterBusiness);
     (prisma.inspection.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "insp-1" });
-    (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...bookingData, ...data }));
 
     const result = await BookingService.renterReceivingInspection("book-1", renterUserId, {
       status: "ACCEPTED",
@@ -278,6 +304,7 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       data: expect.objectContaining({
         type: "RENT_PAYOUT",
         amountPaise: 400000,
+        providerReference: "RENT_PAYOUT_book-1",
       }),
     });
   });
@@ -292,9 +319,8 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       securityDepositPaise: 500000,
     };
 
-    (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(bookingData);
+    useBooking(bookingData);
     (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
-    (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...bookingData, ...data }));
 
     const result = await BookingService.ownerConfirmReceipt("book-1", ownerUserId, {
       received: true,
@@ -319,9 +345,8 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       securityDepositPaise: 500000,
     };
 
-    (prisma.bookingRequest.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(bookingData);
+    useBooking(bookingData);
     (BusinessService.getBusinessByUserId as ReturnType<typeof vi.fn>).mockResolvedValue(ownerBusiness);
-    (prisma.bookingRequest.update as ReturnType<typeof vi.fn>).mockImplementation(({ data }) => Promise.resolve({ ...bookingData, ...data }));
 
     const result = await BookingService.ownerAcceptReturn("book-1", ownerUserId);
 
@@ -350,11 +375,17 @@ describe("Digital Chain of Custody & Dual State Machine", () => {
       }
       return Promise.resolve([]);
     });
+    (prisma.bookingRequest.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 
     await BookingService.processExpiredInspections();
 
-    expect(prisma.bookingRequest.update).toHaveBeenCalledWith({
-      where: { id: "book-expired" },
+    // Claimed with a conditional update: only a booking still in OWNER_INSPECTION with no claims
+    expect(prisma.bookingRequest.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "book-expired",
+        bookingStatus: "OWNER_INSPECTION",
+        damageClaims: { none: {} },
+      }),
       data: expect.objectContaining({
         bookingStatus: "COMPLETED",
         financialStatus: "DEPOSIT_REFUNDED",

@@ -9,9 +9,12 @@ import {
   ownerReceiptSchema,
   ownerDamageClaimSchema,
   renterClaimResponseSchema,
-  adminResolveDisputeSchema,
   razorpayVerifySchema,
+  ownerAcceptReturnSchema,
 } from "../schemas/booking.schema.js";
+import { paginationSchema } from "../utils/pagination.js";
+import { audit } from "../services/audit.service.js";
+import { HttpError } from "../utils/http-error.js";
 
 export class BookingController {
   // ─────────────────────────────────────────────────────────────────────
@@ -45,10 +48,12 @@ export class BookingController {
         return;
       }
 
-      const query = bookingQuerySchema.parse(req.query);
-      const bookingRequests = await BookingService.getBookingRequests(userId, query);
+      const { limit, cursor, ...filters } = req.query;
+      const query = bookingQuerySchema.parse(filters);
+      const page = paginationSchema.parse({ limit, cursor });
+      const { items, nextCursor } = await BookingService.getBookingRequests(userId, query, page);
 
-      res.status(200).json({ success: true, data: { bookingRequests, count: bookingRequests.length } });
+      res.status(200).json({ success: true, data: { bookingRequests: items, count: items.length, nextCursor } });
     } catch (error) {
       next(error);
     }
@@ -65,7 +70,8 @@ export class BookingController {
         return;
       }
 
-      const bookingRequest = await BookingService.getBookingRequestById(id);
+      // Scoped to the renter/owner — anyone else gets the same 404 as a missing id
+      const bookingRequest = await BookingService.getBookingRequestById(id, userId);
       if (!bookingRequest) {
         res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Booking request not found" } });
         return;
@@ -147,13 +153,24 @@ export class BookingController {
       const { razorpayOrderId, razorpayPaymentId, razorpaySignature } =
         razorpayVerifySchema.parse(req.body);
 
-      const booking = await BookingService.verifyAndFundEscrow(
-        id,
-        userId,
-        razorpayOrderId,
-        razorpayPaymentId,
-        razorpaySignature
-      );
+      let booking;
+      try {
+        booking = await BookingService.verifyAndFundEscrow(
+          id,
+          userId,
+          razorpayOrderId,
+          razorpayPaymentId,
+          razorpaySignature
+        );
+      } catch (err) {
+        if (err instanceof HttpError) {
+          await audit({ action: "PAYMENT_VERIFY_FAILED", actorType: "USER", actorId: userId, targetType: "BookingRequest", targetId: id, req,
+            metadata: { reason: err.code, razorpayOrderId, razorpayPaymentId } });
+        }
+        throw err;
+      }
+      await audit({ action: "PAYMENT_VERIFIED", actorType: "USER", actorId: userId, targetType: "BookingRequest", targetId: id, req,
+        metadata: { razorpayOrderId, razorpayPaymentId } });
 
       res.status(200).json({
         success: true,
@@ -277,7 +294,8 @@ export class BookingController {
         return;
       }
 
-      const booking = await BookingService.ownerAcceptReturn(id, userId, req.body.notes);
+      const { notes } = ownerAcceptReturnSchema.parse(req.body ?? {});
+      const booking = await BookingService.ownerAcceptReturn(id, userId, notes);
       res.status(200).json({
         success: true,
         data: { booking },
@@ -334,29 +352,6 @@ export class BookingController {
         message: input.action === "ACCEPT"
           ? "Claim accepted and settled."
           : "Claim disputed. Sent to Customer Care.",
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /** POST /api/bookings/:id/resolve-dispute */
-  static async adminResolveDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const userId = req.userId;
-      const id     = req.params.id as string;
-      if (!userId) {
-        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
-        return;
-      }
-
-      const input   = adminResolveDisputeSchema.parse(req.body);
-      const booking = await BookingService.adminResolveDispute(id, userId, input);
-
-      res.status(200).json({
-        success: true,
-        data: { booking },
-        message: `Dispute successfully resolved with decision: ${input.decision}.`,
       });
     } catch (error) {
       next(error);

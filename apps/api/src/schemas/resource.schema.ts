@@ -23,6 +23,11 @@ const VALID_RESOURCE_TYPES = [
 
 export { VALID_RESOURCE_TYPES };
 
+/** ₹1 crore per day / deposit — keeps booking totals inside the INT money columns */
+export const MAX_AMOUNT_PAISE = 1_00_00_000_00;
+/** Photos must be files uploaded through /api/upload (ownership checked in the service) */
+const photoList = z.array(z.string().min(1).max(500)).max(20, "At most 20 photos");
+
 export const createResourceSchema = z
   .object({
     name: z
@@ -49,19 +54,20 @@ export const createResourceSchema = z
     isActive: z.boolean().default(true),
 
     // Commercial terms (paise: ₹1 = 100 paise)
-    rentAmountPaise: z.number().int().min(0, "Rent amount cannot be negative").default(0),
-    securityDepositPaise: z.number().int().min(0, "Security deposit cannot be negative").default(0),
-    photos: z.array(z.string()).default([]),
+    rentAmountPaise: z.number().int().min(0, "Rent amount cannot be negative").max(MAX_AMOUNT_PAISE, "Rent amount is too large").default(0),
+    securityDepositPaise: z.number().int().min(0, "Security deposit cannot be negative").max(MAX_AMOUNT_PAISE, "Security deposit is too large").default(0),
+    photos: photoList.default([]),
 
     // Chain of custody pre-existing damage disclosure
     hasPreExistingDamage: z.boolean().default(false),
-    damageDescription: z.string().optional().nullable(),
-    damagePhotos: z.array(z.string()).default([]),
+    damageDescription: z.string().max(1000).optional().nullable(),
+    damagePhotos: photoList.default([]),
 
     // Owner-provided transport, charged per km (paise)
     transportAvailable: z.boolean().optional(),
-    transportRatePerKmPaise: z.number().int().min(0, "Transport rate cannot be negative").optional(),
+    transportRatePerKmPaise: z.number().int().min(0, "Transport rate cannot be negative").max(10_000_00, "Transport rate is too large").optional(),
   })
+  .strict()
   .refine(
     (data) => !data.transportAvailable || (data.transportRatePerKmPaise ?? 0) > 0,
     {
@@ -108,16 +114,16 @@ export const updateResourceSchema = z
     location: z.string().max(200, "Location must be 200 characters or less").optional().nullable(),
     isActive: z.boolean().optional(),
 
-    rentAmountPaise: z.number().int().min(0).optional(),
-    securityDepositPaise: z.number().int().min(0).optional(),
-    photos: z.array(z.string()).optional(),
+    rentAmountPaise: z.number().int().min(0).max(MAX_AMOUNT_PAISE).optional(),
+    securityDepositPaise: z.number().int().min(0).max(MAX_AMOUNT_PAISE).optional(),
+    photos: photoList.optional(),
 
     hasPreExistingDamage: z.boolean().optional(),
-    damageDescription: z.string().optional().nullable(),
-    damagePhotos: z.array(z.string()).optional(),
+    damageDescription: z.string().max(1000).optional().nullable(),
+    damagePhotos: photoList.optional(),
 
     transportAvailable: z.boolean().optional(),
-    transportRatePerKmPaise: z.number().int().min(0).optional(),
+    transportRatePerKmPaise: z.number().int().min(0).max(10_000_00).optional(),
   })
   .strict()
   .refine(

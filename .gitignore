@@ -123,7 +123,17 @@ temp/
 context/
 specs/
 Six-File+Context+Methodology/
+# Local Nugen alignment and benchmark drafts
+/docs/nugen/
 
 # ─── User uploads (KYC docs, photos) ────
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
+
+# ─── Security hardening ─────────────────
+# Private KYC documents (GST certificates) — never commit, never serve statically
+apps/api/private-uploads/
+# Rebuilt at runtime from the database (contains listing data)
+apps/api/data/vector-store.json
+# pnpm is the only package manager for this repo
+package-lock.json

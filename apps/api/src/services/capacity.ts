@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../config/database.js";
+import { conflict } from "../utils/http-error.js";
 
 /**
  * Single source of truth for "is there enough of this resource left for these dates?"
@@ -90,10 +91,11 @@ export async function assertCapacity(
   const committed = await getCommittedQuantity(db, resource.id, start, end, excludeBookingId);
   const free = resource.quantity - committed;
   if (quantity > free) {
-    throw new Error(
+    throw conflict(
       free <= 0
         ? "This resource is fully booked for the requested dates."
-        : `Only ${free} of ${resource.quantity} unit(s) are free for the requested dates (requested ${quantity}).`
+        : `Only ${free} of ${resource.quantity} unit(s) are free for the requested dates (requested ${quantity}).`,
+      "CAPACITY_EXCEEDED"
     );
   }
 }

@@ -1,0 +1,41 @@
+/** Stable marketplace search results for tests that exercise the Concierge pipeline. */
+export const multiItemListingMatches = [
+  {
+    score: 0.92,
+    resource: {
+      id: "test-banquet-chairs",
+      name: "Banquet Chairs",
+      resourceType: "Furniture",
+      quantity: 100,
+      unit: "chairs",
+      location: "Pune",
+      status: "available",
+      rentAmountPaise: 15000,
+      securityDepositPaise: 50000,
+      photos: [],
+      hasPreExistingDamage: false,
+      availabilityWindows: [],
+      businessId: "test-provider",
+      business: { name: "Test Event Supplier", reviewsReceived: [] },
+    },
+  },
+  {
+    score: 0.91,
+    resource: {
+      id: "test-banquet-tables",
+      name: "Banquet Tables",
+      resourceType: "Furniture",
+      quantity: 50,
+      unit: "tables",
+      location: "Pune",
+      status: "available",
+      rentAmountPaise: 30000,
+      securityDepositPaise: 80000,
+      photos: [],
+      hasPreExistingDamage: false,
+      availabilityWindows: [],
+      businessId: "test-provider",
+      business: { name: "Test Event Supplier", reviewsReceived: [] },
+    },
+  },
+];
