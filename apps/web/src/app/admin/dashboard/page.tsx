@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, type Easing } from "framer-motion";
 import {
@@ -8,7 +8,7 @@ import {
   CalendarDays, LogOut, Eye, ChevronDown, ChevronUp,
   ExternalLink, AlertTriangle, RefreshCw, Loader2, X, FileText,
 } from "lucide-react";
-import { AdminAuthService, type PendingUser, type AdminSummary } from "@/lib/admin-auth";
+import { AdminAuthService, type AdminUser, type PendingUser, type AdminSummary } from "@/lib/admin-auth";
 import { cn } from "@/lib/utils";
 import { DisputesPanel } from "./disputes-panel";
 
@@ -299,9 +299,31 @@ function RejectModal({
   );
 }
 
+const subscribeToStorage = (onChange: () => void) => {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+};
+
+/**
+ * Admin profile from localStorage. The server snapshot is null, so the first client
+ * render matches the server HTML (no hydration mismatch); React then re-renders with
+ * the stored profile. Also follows logins/logouts in other tabs.
+ */
+function useAdminProfile(): AdminUser | null {
+  const raw = useSyncExternalStore(subscribeToStorage, AdminAuthService.getAdminJson, () => null);
+  return useMemo(() => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AdminUser;
+    } catch {
+      return null;
+    }
+  }, [raw]);
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const [admin, setAdmin] = useState(AdminAuthService.getAdmin());
+  const admin = useAdminProfile();
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [users, setUsers] = useState<PendingUser[]>([]);
   const [tab, setTab] = useState<Tab>("PENDING");

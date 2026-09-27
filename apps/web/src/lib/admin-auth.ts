@@ -91,6 +91,12 @@ export class AdminAuthService {
     return json ? JSON.parse(json) : null;
   }
 
+  /** Raw stored profile JSON — a stable string snapshot for useSyncExternalStore */
+  static getAdminJson(): string | null {
+    if (!isBrowser()) return null;
+    return localStorage.getItem(ADMIN_KEY);
+  }
+
   static clearAdmin(): void {
     if (!isBrowser()) return;
     localStorage.removeItem(ADMIN_TOKEN_KEY);
