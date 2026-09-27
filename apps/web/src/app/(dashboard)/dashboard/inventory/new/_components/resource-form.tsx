@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useEffect, useState, useRef } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, DollarSign, Info, Loader2, ShieldCheck, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,7 +51,15 @@ export default function ResourceForm({
       // After resource is saved, persist availability windows
       const rid = newId ?? resourceId;
       if (rid && availabilityRef.current) {
-        try { await availabilityRef.current.saveToApi(rid); } catch { /* non-fatal */ }
+        try {
+          await availabilityRef.current.saveToApi(rid);
+        } catch (err) {
+          // The listing itself is saved; tell the owner the calendar isn't, instead of hiding it
+          alert(
+            `Your listing was saved, but its availability dates could not be saved (${getErrorMessage(err, "unknown error")}). ` +
+            "Open the listing from Inventory → Edit to add them, otherwise renters will see it as unavailable."
+          );
+        }
       }
       onSuccess?.(newId);
     },

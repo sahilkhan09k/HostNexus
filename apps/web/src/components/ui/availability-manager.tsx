@@ -63,6 +63,8 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
     const [toDate,   setToDate]   = useState(plusDays(today(), 7));
     const [note,     setNote]     = useState("");
     const [addError, setAddError] = useState<string | null>(null);
+    // True once the owner edits the draft range below without clicking "Add Window"
+    const [draftTouched, setDraftTouched] = useState(false);
 
     // ── Load existing windows when editing ─────────────────────
     useEffect(() => {
@@ -91,7 +93,16 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
       setSaving(true);
       setSaveError(null);
       try {
-        const payload = windows.map(w => ({
+        // Owners often pick dates in the draft form and save without clicking
+        // "Add Window". Keep that range instead of silently dropping it — and
+        // when no window was added at all, the range shown is what they meant.
+        const draftValid = !!fromDate && !!toDate && toDate >= fromDate;
+        const draftIsNew = !windows.some(w => w.fromDate === fromDate && w.toDate === toDate);
+        const toSave = draftValid && draftIsNew && (draftTouched || windows.length === 0)
+          ? [...windows, { fromDate, toDate, note: note.trim() }]
+          : windows;
+
+        const payload = toSave.map(w => ({
           fromDate: new Date(w.fromDate).toISOString(),
           toDate:   new Date(w.toDate).toISOString(),
           note:     w.note || undefined,
@@ -118,6 +129,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
         }));
         setWindows(saved);
         onChange?.(saved);
+        setDraftTouched(false);
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 3000);
       } catch (err) {
@@ -126,7 +138,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
       } finally {
         setSaving(false);
       }
-    }, [windows, onChange]);
+    }, [windows, onChange, fromDate, toDate, note, draftTouched]);
 
     useImperativeHandle(ref, () => ({ saveToApi }), [saveToApi]);
 
@@ -148,6 +160,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
       setNote("");
       setFromDate(today());
       setToDate(plusDays(today(), 7));
+      setDraftTouched(false);
     };
 
     // ── Remove a window locally ────────────────────────────────
@@ -273,6 +286,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
                 min={today()}
                 onChange={(e) => {
                   setFromDate(e.target.value);
+                  setDraftTouched(true);
                   if (e.target.value > toDate) setToDate(plusDays(e.target.value, 1));
                 }}
                 className={cn(INPUT, "bg-white")}
@@ -284,7 +298,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
                 type="date"
                 value={toDate}
                 min={fromDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => { setToDate(e.target.value); setDraftTouched(true); }}
                 className={cn(INPUT, "bg-white")}
               />
             </div>
@@ -297,12 +311,20 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
             <input
               type="text"
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => { setNote(e.target.value); setDraftTouched(true); }}
               placeholder="e.g. Weekdays only, morning pickup"
               maxLength={200}
               className={cn(INPUT, "bg-white")}
             />
           </div>
+
+          <p className="text-[11px] text-stone-500">
+            {windows.length === 0
+              ? "This range is saved with the listing. Click Add Window to add more than one."
+              : draftTouched
+              ? "This range will also be saved with the listing."
+              : "Click Add Window to add another range."}
+          </p>
 
           {addError && (
             <div className="flex items-center gap-2 text-xs text-rose-600">
