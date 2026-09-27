@@ -189,6 +189,17 @@ export class AuthService {
     }
   }
 
+  /**
+   * A non-expired access token, refreshing it if needed. Returns null instead of
+   * redirecting — used by background connections (realtime socket) that must not
+   * navigate the page on their own.
+   */
+  static async getValidAccessToken(): Promise<string | null> {
+    const accessToken = this.getAccessToken();
+    if (accessToken && !isTokenExpired(accessToken)) return accessToken;
+    return this.refreshTokens();
+  }
+
   // ── Authenticated fetch wrapper ───────────────────────────
 
   static async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {

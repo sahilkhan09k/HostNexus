@@ -2,6 +2,7 @@ import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { BookingService, MAX_ORDER_PAISE, MIN_ORDER_PAISE } from "./booking.service.js";
 import { assertCapacity, lockResource } from "./capacity.js";
+import { notifyBookingEvent } from "./notifications/booking-notifications.js";
 import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
 
 // ─── Logic ───────────────────────────────────────────────────
@@ -102,7 +103,7 @@ export class NegotiationService {
 
     const proposerRole = isSeeker ? "SEEKER" : "PROVIDER";
 
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       let negotiation = booking.negotiation;
 
       // ── Create negotiation on first offer ──
@@ -155,6 +156,14 @@ export class NegotiationService {
 
       return offer;
     });
+
+    void notifyBookingEvent(bookingId, {
+      kind: "NEGOTIATION_OFFER",
+      by: isSeeker ? "RENTER" : "OWNER",
+      amountPaise: offeredAmountPaise,
+      message,
+    });
+    return created;
   }
 
   /**
@@ -205,7 +214,7 @@ export class NegotiationService {
       throw unprocessable("The negotiated total is out of range", "INVALID_OFFER");
     }
 
-    return prisma.$transaction(async (tx) => {
+    const accepted = await prisma.$transaction(async (tx) => {
       // Same overbooking protection as the owner's normal accept
       await lockResource(tx, booking.resourceId);
       const resource = await tx.resource.findUnique({ where: { id: booking.resourceId } });
@@ -250,6 +259,13 @@ export class NegotiationService {
 
       return tx.bookingRequest.findUniqueOrThrow({ where: { id: bookingId } });
     });
+
+    void notifyBookingEvent(bookingId, {
+      kind: "NEGOTIATION_ACCEPTED",
+      by: isSeeker ? "RENTER" : "OWNER",
+      amountPaise: latestOffer.offeredAmountPaise,
+    });
+    return accepted;
   }
 
   /**
@@ -296,5 +312,6 @@ export class NegotiationService {
         ? `${business.name} rejected the negotiation: "${reason}"`
         : `${business.name} ended the price negotiation.`
     );
+    void notifyBookingEvent(bookingId, { kind: "NEGOTIATION_REJECTED", by: isSeeker ? "RENTER" : "OWNER" });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Calendar,
@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { useRealtimeEvent } from "@/contexts/notification-context";
 import { ImageUploader } from "@/components/ui/image-uploader";
 import {
   getBookingRequests,
@@ -89,9 +90,22 @@ function useCountdown(targetDate: string | null | undefined) {
   return timeLeft;
 }
 
+/** Booking ids from notification deep links (?booking=<id>) — never put anything else into API paths */
+const BOOKING_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+// useSearchParams needs a Suspense boundary in the App Router
 export default function BookingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <BookingsPageContent />
+    </Suspense>
+  );
+}
+
+function BookingsPageContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<"incoming" | "outgoing" | "disputes">("incoming");
   const [bookings, setBookings] = useState<BookingRequestWithDetails[]>([]);
@@ -137,9 +151,10 @@ export default function BookingsPage() {
     fetchBookings();
   }, [activeTab]);
 
-  const fetchBookings = async () => {
+  // Background refreshes (realtime updates) keep the current list on screen
+  const fetchBookings = async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
+      if (!opts.silent) setLoading(true);
       setError("");
       const query: Record<string, string> = activeTab === "disputes" ? {} : { type: activeTab };
       const data = await getBookingRequests(query);
@@ -178,6 +193,45 @@ export default function BookingsPage() {
       console.error(err);
     }
   };
+
+  // Deep link from a notification: /dashboard/bookings?tab=incoming&booking=<id>
+  const deepLinkBooking = searchParams.get("booking");
+  const deepLinkTab = searchParams.get("tab");
+
+  // Switch tab when a link arrives (render-time update, so no extra effect pass)
+  const [appliedLinkTab, setAppliedLinkTab] = useState<string | null>(null);
+  if (deepLinkTab !== appliedLinkTab) {
+    setAppliedLinkTab(deepLinkTab);
+    if (deepLinkTab === "incoming" || deepLinkTab === "outgoing" || deepLinkTab === "disputes") {
+      setActiveTab(deepLinkTab);
+    }
+  }
+
+  // Open the linked booking once it has loaded (a stale/foreign id simply doesn't open)
+  useEffect(() => {
+    if (!deepLinkBooking && !deepLinkTab) return;
+    // One-shot: clear the query so the same link works again and a reload doesn't reopen it
+    router.replace("/dashboard/bookings", { scroll: false });
+    if (!deepLinkBooking || !BOOKING_ID_RE.test(deepLinkBooking)) return;
+
+    let cancelled = false;
+    getBookingRequestById(deepLinkBooking)
+      .then((data) => {
+        if (cancelled) return;
+        setSelectedBookingId(data.id);
+        setSelectedBooking(data);
+      })
+      .catch((err) => console.error("Failed to open linked booking", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [deepLinkBooking, deepLinkTab, router]);
+
+  // Live updates: the other party acted on one of our bookings
+  useRealtimeEvent("booking:updated", ({ bookingId }) => {
+    void fetchBookings({ silent: true });
+    if (bookingId === selectedBookingId) void refreshDetail();
+  });
 
   // ── Actions ──────────────────────────────────────────────────
   const handleAccept = async (id: string) => {

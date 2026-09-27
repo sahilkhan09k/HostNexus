@@ -459,3 +459,43 @@ export interface BookingQuery {
   bookingStatus?: BookingStatus;
   financialStatus?: FinancialStatus;
 }
+
+// ─────────────────────────────────────────
+// Notifications (REST /api/notifications + Socket.IO)
+// ─────────────────────────────────────────
+
+/** Ids the client needs to open the related object. `link` is an app-relative path. */
+export interface NotificationData {
+  link?: string;
+  bookingId?: string;
+  resourceId?: string;
+  businessId?: string;
+  reviewId?: string;
+  negotiationId?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  data: NotificationData | null;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationListResponse {
+  notifications: AppNotification[];
+  count: number;
+  nextCursor: string | null;
+  unreadCount: number;
+}
+
+/** Server → client socket events */
+export interface RealtimeEvents {
+  "notification:new": { notification: AppNotification; toast: boolean };
+  "notification:read": { ids: string[]; all: boolean };
+  "booking:updated": { bookingId: string; event: string };
+  "negotiation:updated": { bookingId: string; event: string };
+}

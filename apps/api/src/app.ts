@@ -14,6 +14,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import reviewRoutes from "./routes/review.routes.js";
 import negotiationRoutes from "./routes/negotiation.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import { handleRazorpayWebhook } from "./controllers/webhook.controller.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { globalLimiter } from "./middleware/rate-limit.js";
@@ -100,6 +101,7 @@ export function createApp(): Express {
   app.use("/api/reviews", reviewRoutes);
   app.use("/api/negotiations", negotiationRoutes);
   app.use("/api/ai", aiRoutes);
+  app.use("/api/notifications", notificationRoutes);
 
   // Unknown routes → JSON 404 (no framework fingerprinting)
   app.use((_req, res) => {

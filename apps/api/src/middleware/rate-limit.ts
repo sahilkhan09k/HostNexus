@@ -64,5 +64,10 @@ export const writeLimiter = limiter("write", MINUTE, 30, {
   skip: (req) => disabled || req.method === "GET",
 });
 
+/** Notification center: polling fallback + mark-as-read clicks, kept apart from the write budget */
+export const notificationLimiter = limiter("notifications", MINUTE, 120, {
+  keyGenerator: (req) => `notifications:${userOrIp(req)}`,
+});
+
 /** Unauthenticated read endpoints that hit the database */
 export const publicReadLimiter = limiter("public-read", MINUTE, 60);

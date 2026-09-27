@@ -5,6 +5,8 @@ import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
 import { AuthService, JWT_ISSUER, SALT_ROUNDS } from "./auth.service.js";
 import { notFound, unauthorized } from "../utils/http-error.js";
+import { notifyKycEvent } from "./notifications/account-notifications.js";
+import { disconnectUser } from "./notifications/realtime.service.js";
 import { pageArgs, toPage, type Pagination } from "../utils/pagination.js";
 
 const ADMIN_TOKEN_EXPIRY = "1h";
@@ -115,18 +117,20 @@ export class AdminService {
 
   /** Approve a user — flips verificationStatus to VERIFIED */
   static async approveUser(userId: string) {
-    const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, verificationStatus: true } });
     if (!exists) throw notFound("User not found");
-    return prisma.user.update({
+    const user = await prisma.user.update({
       where: { id: userId },
       data: { verificationStatus: "VERIFIED" },
       select: USER_LIST_SELECT,
     });
+    if (exists.verificationStatus !== "VERIFIED") void notifyKycEvent(userId, { kind: "APPROVED" });
+    return user;
   }
 
   /** Reject a user with an optional reason — also kills every live session they hold */
   static async rejectUser(userId: string, notes?: string) {
-    const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, verificationStatus: true } });
     if (!exists) throw notFound("User not found");
     const user = await prisma.user.update({
       where: { id: userId },
@@ -134,6 +138,8 @@ export class AdminService {
       select: USER_LIST_SELECT,
     });
     await AuthService.revokeAllSessions(userId);
+    disconnectUser(userId); // drop live sockets now rather than at token expiry
+    if (exists.verificationStatus !== "REJECTED") void notifyKycEvent(userId, { kind: "REJECTED", reason: notes });
     return user;
   }
 

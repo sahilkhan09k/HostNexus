@@ -5,6 +5,7 @@ import { BusinessService } from "./business.service.js";
 import { RazorpayService, type RazorpayPaymentSummary } from "./razorpay.service.js";
 import { assertCapacity, lockResource } from "./capacity.js";
 import { resolveOwnedMedia } from "./evidence.js";
+import { notifyBookingEvent } from "./notifications/booking-notifications.js";
 import { badRequest, conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
 import { pageArgs, toPage, type Pagination } from "../utils/pagination.js";
 import type {
@@ -155,6 +156,7 @@ export class BookingService {
           "Renter Inspection Window Expired (Auto-Accepted)",
           "The 1-hour inspection window elapsed without reported defects. Resource marked active and rent released to owner; deposit remains safely in escrow."
         );
+        void notifyBookingEvent(booking.id, { kind: "RENT_RELEASED", auto: true });
       }
     }
 
@@ -195,6 +197,7 @@ export class BookingService {
           "Owner Inspection Window Expired (Deposit Auto-Refunded)",
           "The 2-hour owner return inspection window elapsed without damage claims. Full security deposit has been automatically refunded to the renter."
         );
+        void notifyBookingEvent(booking.id, { kind: "RETURN_ACCEPTED", auto: true });
       }
     }
   }
@@ -351,6 +354,7 @@ export class BookingService {
           : "Renter arranges own transport."
       }`
     );
+    void notifyBookingEvent(bookingRequest.id, { kind: "REQUESTED" });
 
     return bookingRequest;
   }
@@ -491,6 +495,7 @@ export class BookingService {
         "Booking Accepted",
         `Owner ${business.name} accepted the booking request. Awaiting renter escrow payment.`
       );
+      void notifyBookingEvent(bookingId, { kind: "ACCEPTED" });
       return updated;
     }
 
@@ -515,6 +520,7 @@ export class BookingService {
         "Booking Rejected",
         input.rejectionReason || "Owner declined the booking request."
       );
+      void notifyBookingEvent(bookingId, { kind: "REJECTED" });
       return updated;
     }
 
@@ -573,6 +579,7 @@ export class BookingService {
           ? `Renter cancelled before handover. Escrow payment of ₹${(refundedPaise / 100).toLocaleString()} refunded.`
           : input.rejectionReason || "Renter cancelled the booking."
       );
+      void notifyBookingEvent(bookingId, { kind: "CANCELLED", refundedPaise });
       return updated;
     }
 
@@ -730,6 +737,7 @@ export class BookingService {
       `₹${(payment.amount / 100).toLocaleString()} (Rent: ₹${(booking.rentAmountPaise / 100).toLocaleString()} + Deposit: ₹${(booking.securityDepositPaise / 100).toLocaleString()}${booking.transportFeePaise > 0 ? ` + Transport: ₹${(booking.transportFeePaise / 100).toLocaleString()}` : ""}) safely held in platform escrow. Razorpay Payment ID: ${payment.id}`,
       { razorpayOrderId, razorpayPaymentId: payment.id }
     );
+    void notifyBookingEvent(bookingId, { kind: "PAYMENT_RECEIVED" });
 
     return updated;
   }
@@ -758,6 +766,7 @@ export class BookingService {
       `₹${(payment.amount / 100).toLocaleString()} confirmed by Razorpay and held in platform escrow. Razorpay Payment ID: ${payment.id}`,
       { razorpayOrderId, razorpayPaymentId: payment.id, source: "webhook" }
     );
+    void notifyBookingEvent(booking.id, { kind: "PAYMENT_RECEIVED" });
     return true;
   }
 
@@ -798,6 +807,7 @@ export class BookingService {
       "Resource Handed Over (Inspection Window Started)",
       `Physical transfer initiated. Renter has 1 hour (until ${deadline.toLocaleTimeString()}) to inspect condition and accept or report critical discrepancies.`
     );
+    void notifyBookingEvent(bookingId, { kind: "HANDOVER_STARTED", deadline });
 
     return updated;
   }
@@ -881,6 +891,7 @@ export class BookingService {
         "Resource Accepted by Renter",
         `Renter confirmed physical receipt and acceptable condition. Rent (₹${(booking.rentAmountPaise / 100).toLocaleString()})${booking.transportFeePaise > 0 ? ` and transport fee (₹${(booking.transportFeePaise / 100).toLocaleString()})` : ""} disbursed to owner; Security Deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) remains safely held in escrow.`
       );
+      void notifyBookingEvent(bookingId, { kind: "RENT_RELEASED", auto: false });
 
       return updated;
 
@@ -945,6 +956,7 @@ export class BookingService {
         "Critical Handover Issue Reported",
         `Renter reported severe discrepancy or defects during receiving inspection: "${input.issueDescription}". Booking entered dispute; platform escrow frozen.`
       );
+      void notifyBookingEvent(bookingId, { kind: "HANDOVER_ISSUE" });
 
       return updated;
     }
@@ -1013,6 +1025,7 @@ export class BookingService {
         ? `Renter marked early return (before agreed end date ${booking.endDate.toLocaleDateString()}). Evidence uploaded. Awaiting owner confirmation.`
         : "Renter marked resources returned and uploaded return condition evidence. Awaiting owner confirmation of physical receipt."
     );
+    void notifyBookingEvent(bookingId, { kind: "RETURN_INITIATED", early: isEarlyReturn });
 
     return updated;
   }
@@ -1053,6 +1066,7 @@ export class BookingService {
         "Physical Receipt Confirmed (2-Hour Window Started)",
         `Owner confirmed physical receipt of returned items. 2-hour inspection window active until ${deadline.toLocaleTimeString()}. If no damage is reported, the security deposit of ₹${(booking.securityDepositPaise / 100).toLocaleString()} will be automatically refunded.`
       );
+      void notifyBookingEvent(bookingId, { kind: "RETURN_RECEIVED", deadline });
 
       return updated;
 
@@ -1093,6 +1107,7 @@ export class BookingService {
         "Return Not Received (Dispute Filed)",
         "Owner reported resources were NOT received despite renter's return claim. Booking entered DISPUTED status and sent to Customer Care."
       );
+      void notifyBookingEvent(bookingId, { kind: "RETURN_NOT_RECEIVED" });
 
       return updated;
     }
@@ -1142,6 +1157,7 @@ export class BookingService {
       "Return Accepted & Deposit Released",
       `Owner confirmed pristine condition. Security deposit (₹${(booking.securityDepositPaise / 100).toLocaleString()}) refunded to renter. Rental transaction complete.`
     );
+    void notifyBookingEvent(bookingId, { kind: "RETURN_ACCEPTED", auto: false });
 
     return updated;
   }
@@ -1226,6 +1242,7 @@ export class BookingService {
       "Owner Filed Damage Claim",
       `Owner filed a claim for ₹${(input.claimedAmountPaise / 100).toLocaleString()} (${input.claimType}): "${input.description}". Deposit held in dispute.`
     );
+    void notifyBookingEvent(bookingId, { kind: "DAMAGE_CLAIMED", amountPaise: input.claimedAmountPaise });
 
     return updated;
   }
@@ -1324,6 +1341,7 @@ export class BookingService {
         "Damage Claim Accepted by Renter",
         `Renter agreed to ₹${(payoutToOwner / 100).toLocaleString()} deduction from deposit. Remaining ₹${(refundToRenter / 100).toLocaleString()} refunded.`
       );
+      void notifyBookingEvent(bookingId, { kind: "CLAIM_ACCEPTED", payoutPaise: payoutToOwner, refundPaise: refundToRenter });
 
       return updated;
 
@@ -1360,6 +1378,7 @@ export class BookingService {
         "Renter Disputed Damage Claim",
         `Renter contested claim (${input.reason || "Disputed"}): "${input.rebuttalNotes || "Condition disputed"}". Sent to Customer Care Panel for review.`
       );
+      void notifyBookingEvent(bookingId, { kind: "CLAIM_DISPUTED" });
 
       return updated;
     }
@@ -1463,6 +1482,7 @@ export class BookingService {
       `Dispute Resolved by Customer Care (${input.decision})`,
       `${input.resolutionNotes}. Financial settlement executed.`
     );
+    void notifyBookingEvent(bookingId, { kind: "DISPUTE_RESOLVED", decision: input.decision });
 
     return updated;
   }
@@ -1519,6 +1539,7 @@ export class BookingService {
       "Resource Non-Return Reported",
       "Owner reported that the resource was not returned after the agreed rental period. Dispute opened; deposit held; sent to Customer Care."
     );
+    void notifyBookingEvent(bookingId, { kind: "NON_RETURN_REPORTED" });
 
     return updated;
   }

@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { AuthService } from "../services/auth.service.js";
 import { audit } from "../services/audit.service.js";
+import { notifyKycEvent } from "../services/notifications/account-notifications.js";
 import { registerSchema, loginSchema, refreshSchema } from "../schemas/auth.schema.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -12,6 +13,7 @@ export class AuthController {
       const result = await AuthService.register(input);
       await audit({ action: "AUTH_REGISTER", actorType: "USER", actorId: result.user.id, req,
         metadata: { autoVerified: result.autoVerified, gstin: result.gstin.gstin } });
+      void notifyKycEvent(result.user.id, { kind: result.autoVerified ? "AUTO_VERIFIED" : "SUBMITTED" });
       res.status(201).json({
         success: true,
         data: { user: result.user, gstin: result.gstin },

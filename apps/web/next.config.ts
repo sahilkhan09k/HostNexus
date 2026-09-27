@@ -9,6 +9,9 @@ const API_ORIGIN = (() => {
   }
 })();
 
+/** Realtime notifications (Socket.IO) use the API origin over ws:/wss: */
+const API_WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
+
 /**
  * Content Security Policy.
  * - scripts: our own bundle + Razorpay Checkout. 'unsafe-inline' is required for
@@ -23,7 +26,7 @@ const csp = [
   `img-src 'self' data: blob: ${API_ORIGIN} https://images.unsplash.com https://*.razorpay.com`,
   `media-src 'self' blob: ${API_ORIGIN}`,
   "font-src 'self' data:",
-  `connect-src 'self' ${API_ORIGIN} https://api.razorpay.com https://lumberjack.razorpay.com https://raw.githack.com${isDev ? " ws: wss:" : ""}`,
+  `connect-src 'self' ${API_ORIGIN} ${API_WS_ORIGIN} https://api.razorpay.com https://lumberjack.razorpay.com https://raw.githack.com${isDev ? " ws: wss:" : ""}`,
   "frame-src https://api.razorpay.com https://checkout.razorpay.com",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",

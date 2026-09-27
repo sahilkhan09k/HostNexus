@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { BusinessService } from "./business.service.js";
 import { conflict, forbidden, notFound, unprocessable } from "../utils/http-error.js";
+import { notifyReviewReceived } from "./notifications/account-notifications.js";
 
 export interface SubmitReviewInput {
   bookingId: string;
@@ -117,15 +118,18 @@ export class ReviewService {
     // Subject = the other party
     const subjectId    = isSeeker ? booking.providerId : booking.seekerId;
 
+    const reviewKey = {
+      bookingId_reviewerId_reviewerRole: {
+        bookingId:    input.bookingId,
+        reviewerId:   business.id,
+        reviewerRole,
+      },
+    };
+    const isNew = !(await prisma.review.findUnique({ where: reviewKey, select: { id: true } }));
+
     // Upsert — idempotent if they try to re-submit
     const review = await prisma.review.upsert({
-      where: {
-        bookingId_reviewerId_reviewerRole: {
-          bookingId:    input.bookingId,
-          reviewerId:   business.id,
-          reviewerRole,
-        },
-      },
+      where: reviewKey,
       update: {
         rating:  input.rating,
         comment: input.comment ?? null,
@@ -139,6 +143,9 @@ export class ReviewService {
         comment:      input.comment ?? null,
       },
     });
+
+    // Only a first review is news to the other party; edits stay silent
+    if (isNew) void notifyReviewReceived(review.id);
 
     return review;
   }

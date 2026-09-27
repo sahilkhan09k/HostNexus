@@ -38,6 +38,19 @@ const envSchema = z
     CHROMA_TENANT: z.string().optional(),
     CHROMA_DATABASE: z.string().optional(),
     PRISMA_LOG_QUERIES: z.enum(["true", "false"]).optional(),
+
+    // Transactional email (SMTP). When EMAIL_USER/EMAIL_PASSWORD are unset, emails are skipped
+    // and notifications still work in-app. Host/port default to Gmail (app password required).
+    EMAIL_USER: z.string().email().optional(),
+    EMAIL_PASSWORD: z.string().min(1).optional(),
+    EMAIL_HOST: z.string().default("smtp.gmail.com"),
+    EMAIL_PORT: z.string().regex(/^\d+$/).transform(Number).default("465"),
+    // "Display Name <address>" — defaults to "HostNexus <EMAIL_USER>"
+    EMAIL_FROM: z.string().optional(),
+    // Set to "false" to turn off outgoing mail without removing credentials (e.g. staging)
+    EMAIL_ENABLED: z.enum(["true", "false"]).default("true"),
+    // Public URL of the web app, used for links inside emails. Defaults to the first FRONTEND_URL origin.
+    APP_URL: z.string().url().optional(),
   })
   .superRefine((e, ctx) => {
     if (e.NODE_ENV === "production") {
@@ -49,6 +62,9 @@ const envSchema = z
       }
     } else if (e.RAZORPAY_KEY_ID?.startsWith("rzp_live_")) {
       ctx.addIssue({ code: "custom", path: ["RAZORPAY_KEY_ID"], message: "Live Razorpay key must not be used outside production" });
+    }
+    if (Boolean(e.EMAIL_USER) !== Boolean(e.EMAIL_PASSWORD)) {
+      ctx.addIssue({ code: "custom", path: ["EMAIL_PASSWORD"], message: "EMAIL_USER and EMAIL_PASSWORD must be set together" });
     }
     if (e.JWT_SECRET === e.REFRESH_TOKEN_SECRET) {
       ctx.addIssue({ code: "custom", path: ["REFRESH_TOKEN_SECRET"], message: "REFRESH_TOKEN_SECRET must differ from JWT_SECRET" });
@@ -76,3 +92,6 @@ export const allowedOrigins: string[] = (env.FRONTEND_URL ?? (isProduction ? "" 
   .split(",")
   .map((s) => s.trim().replace(/\/$/, ""))
   .filter(Boolean);
+
+/** Base URL of the web app for links in emails (no trailing slash). */
+export const appUrl: string = (env.APP_URL ?? allowedOrigins[0] ?? "http://localhost:3000").replace(/\/$/, "");
