@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { motion, useMotionValueEvent, useScroll, type Easing } from "framer-motion";
 import { Building2, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,14 +37,14 @@ export function Navbar() {
       >
         <nav className="app-container flex h-[68px] items-center justify-between">
           {/* Logo */}
-          <a href="/" className="group flex items-center gap-2">
+          <Link href="/" className="group flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 transition-all duration-200 group-hover:bg-emerald-600">
               <Building2 className="h-4.5 w-4.5 text-white" strokeWidth={2.2} />
             </div>
             <span className="text-lg font-medium tracking-[-0.04em] text-stone-900">
               HostNexus
             </span>
-          </a>
+          </Link>
 
           {/* Center links */}
           <ul className="hidden items-center gap-1 md:flex">

@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -80,12 +82,11 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
   const [year, setYear]     = useState(now.getFullYear());
   const [month, setMonth]   = useState(now.getMonth()); // 0-indexed
   const [calData, setCalData] = useState<CalendarData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const monthStr = `${year}-${String(month + 1).padStart(2, "0")}`;
 
   useEffect(() => {
-    setLoading(true);
     fetch(`${API_BASE}/api/resources/${resourceId}/availability/calendar?month=${monthStr}`)
       .then(r => r.json())
       .then(body => { if (body.success) setCalData(body.data); })
@@ -93,8 +94,8 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
       .finally(() => setLoading(false));
   }, [resourceId, monthStr]);
 
-  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
-  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+  const prevMonth = () => { setLoading(true); if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
+  const nextMonth = () => { setLoading(true); if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
 
   // Build day grid
   const firstDay = new Date(year, month, 1).getDay();
@@ -188,7 +189,7 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
       {calData && calData.availableWindows.length === 0 && (
         <div className="mt-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          Owner hasn't set availability windows yet. Contact them directly.
+          Owner hasn&apos;t set availability windows yet. Contact them directly.
         </div>
       )}
     </div>
@@ -293,7 +294,7 @@ function OwnerProfileCard({ businessId, businessName, city, state, businessType 
               <Stars rating={rep.recentReviews[0].rating} />
               {rep.recentReviews[0].comment && (
                 <p className="mt-1.5 text-xs text-stone-600 leading-relaxed line-clamp-3">
-                  "{rep.recentReviews[0].comment}"
+                  &quot;{rep.recentReviews[0].comment}&quot;
                 </p>
               )}
               <p className="mt-1.5 text-[10px] text-stone-400">
@@ -332,20 +333,23 @@ export default function ResourceDetailPage() {
 
   const fetchResource = useCallback(async () => {
     if (!id) return;
-    setLoading(true); setError(null);
     try {
       const res = await AuthService.fetchWithAuth(`${API_BASE}/api/resources/${id}`);
       if (!res.ok) throw new Error("Resource not found");
       const body = await res.json();
       setResource(body.data.resource as ResourceDetail);
-    } catch (e: any) {
-      setError(e.message ?? "Failed to load resource");
+    } catch (e) {
+      setError(getErrorMessage(e, "Failed to load resource"));
     } finally {
       setLoading(false);
     }
   }, [id]);
 
-  useEffect(() => { fetchResource(); }, [fetchResource]);
+  useEffect(() => {
+    // Fetch results update state after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchResource();
+  }, [fetchResource]);
 
   // ── Loading ──
   if (loading) {

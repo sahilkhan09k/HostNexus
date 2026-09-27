@@ -28,6 +28,8 @@ function ProfileTab() {
 
   useEffect(() => {
     const stored = localStorage.getItem(DISPLAY_NAME_KEY) ?? "";
+    // Browser storage is only available after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayName(stored);
   }, []);
 
@@ -110,15 +112,10 @@ function ProfileTab() {
 
 function BusinessTab() {
   const { business, fetchWithAuth } = useAuth();
-  const [businessName, setBusinessName] = useState("");
+  const [editedBusinessName, setBusinessName] = useState<string | null>(null);
+  const businessName = editedBusinessName ?? business?.name ?? "";
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
-
-  useEffect(() => {
-    if (business?.name) {
-      setBusinessName(business.name);
-    }
-  }, [business]);
 
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });

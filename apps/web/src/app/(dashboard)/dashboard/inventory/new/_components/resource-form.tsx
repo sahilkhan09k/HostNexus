@@ -61,21 +61,18 @@ export default function ResourceForm({
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
-  const [errorDismissed, setErrorDismissed] = useState(false);
-  useEffect(() => {
-    if (submitError) setErrorDismissed(false);
-  }, [submitError]);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
   return (
-    <form onSubmit={_handleSubmit} className="space-y-8 w-full max-w-6xl mx-auto">
-      {submitError && !errorDismissed && (
+    <form onSubmit={(event) => { setDismissedError(null); void _handleSubmit(event); }} className="space-y-8 w-full max-w-6xl mx-auto">
+      {submitError && dismissedError !== submitError && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
           <div className="flex-1 text-sm text-rose-800">{submitError}</div>
           <button
             type="button"
             aria-label="Dismiss error"
-            onClick={() => setErrorDismissed(true)}
+            onClick={() => setDismissedError(submitError)}
             className="text-rose-500 hover:text-rose-700"
           >
             <X className="w-4 h-4" />
@@ -355,7 +352,7 @@ export default function ResourceForm({
         <div className="rounded-xl border border-amber-200/80 bg-amber-50/70 p-3.5 flex items-start gap-3 text-xs text-amber-900">
           <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div>
-            <span className="font-semibold">Platform Recommendation:</span> Keep the security deposit reasonable and proportionate to the resource's replacement value. High deposits can reduce renter booking conversions.
+            <span className="font-semibold">Platform Recommendation:</span> Keep the security deposit reasonable and proportionate to the resource&apos;s replacement value. High deposits can reduce renter booking conversions.
           </div>
         </div>
       </div>

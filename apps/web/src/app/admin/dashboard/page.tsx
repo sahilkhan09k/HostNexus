@@ -366,7 +366,11 @@ export default function AdminDashboardPage() {
     }
   }, [tab, router]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    // Load data for the selected tab and keep its loading indicator.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+  }, [loadData]);
 
   const handleApprove = async (id: string) => {
     setActionState({ id, type: "approve" });

@@ -71,7 +71,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
         .then(r => r.json())
         .then(body => {
           if (body.success) {
-            const loaded: AvailabilityWindow[] = (body.data.windows as any[]).map(w => ({
+            const loaded: AvailabilityWindow[] = (body.data.windows as (AvailabilityWindow & { fromDate: string; toDate: string })[]).map(w => ({
               id:       w.id,
               fromDate: w.fromDate.split("T")[0],
               toDate:   w.toDate.split("T")[0],
@@ -110,7 +110,7 @@ const AvailabilityManager = forwardRef<AvailabilityManagerHandle, Props>(
         }
         const body = await res.json();
         // Sync IDs back from server
-        const saved: AvailabilityWindow[] = (body.data.windows as any[]).map(w => ({
+        const saved: AvailabilityWindow[] = (body.data.windows as (AvailabilityWindow & { fromDate: string; toDate: string })[]).map(w => ({
           id:       w.id,
           fromDate: w.fromDate.split("T")[0],
           toDate:   w.toDate.split("T")[0],

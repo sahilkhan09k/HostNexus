@@ -49,13 +49,8 @@ export default function InventoryPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  useEffect(() => {
-    fetchResources();
-  }, []);
-
   const fetchResources = async () => {
     try {
-      setLoading(true);
       const response = await fetchWithAuth(`${API_URL}/api/resources`);
 
       if (!response.ok) {
@@ -70,6 +65,12 @@ export default function InventoryPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Fetch results update state after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchResources();
+  }, []);
 
   const handleDelete = async (resource: Resource) => {
     const confirmed = window.confirm(

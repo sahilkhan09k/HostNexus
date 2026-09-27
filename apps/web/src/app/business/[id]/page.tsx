@@ -192,7 +192,6 @@ export default function BusinessProfilePage() {
 
   useEffect(() => {
     if (!businessId) return;
-    setLoading(true);
     fetch(`${API_BASE}/api/reviews/business/${businessId}`)
       .then(r => r.json())
       .then(body => {

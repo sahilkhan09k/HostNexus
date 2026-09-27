@@ -7,6 +7,28 @@ import { OrbitControls, Environment } from "@react-three/drei";
 import * as THREE from "three";
 
 /* ─── Building geometry ─── */
+function WindowGrid({
+  cols, rows, offsetX, offsetY, offsetZ, winW = 0.08, winH = 0.1,
+  spacing = 0.22, vSpacing = 0.2, mat,
+}: {
+  cols: number; rows: number; offsetX: number; offsetY: number; offsetZ: number;
+  winW?: number; winH?: number; spacing?: number; vSpacing?: number; mat: THREE.Material;
+}) {
+  const windows: ReactElement[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = offsetX + (c - (cols - 1) / 2) * spacing;
+      const y = offsetY + r * vSpacing;
+      windows.push(
+        <mesh key={`w-${r}-${c}`} position={[x, y, offsetZ]} material={mat}>
+          <boxGeometry args={[winW, winH, 0.01]} />
+        </mesh>
+      );
+    }
+  }
+  return <>{windows}</>;
+}
+
 function HotelBuilding() {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -33,45 +55,6 @@ function HotelBuilding() {
     roughness: 0.1,
     metalness: 0.2,
   });
-
-  // Window grid helper
-  const WindowGrid = ({
-    cols,
-    rows,
-    offsetX,
-    offsetY,
-    offsetZ,
-    winW = 0.08,
-    winH = 0.1,
-    spacing = 0.22,
-    vSpacing = 0.2,
-    mat,
-  }: {
-    cols: number;
-    rows: number;
-    offsetX: number;
-    offsetY: number;
-    offsetZ: number;
-    winW?: number;
-    winH?: number;
-    spacing?: number;
-    vSpacing?: number;
-    mat: THREE.Material;
-  }) => {
-    const windows: ReactElement[] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const x = offsetX + (c - (cols - 1) / 2) * spacing;
-        const y = offsetY + r * vSpacing;
-        windows.push(
-          <mesh key={`w-${r}-${c}`} position={[x, y, offsetZ]} material={mat}>
-            <boxGeometry args={[winW, winH, 0.01]} />
-          </mesh>
-        );
-      }
-    }
-    return <>{windows}</>;
-  };
 
   return (
     <group ref={groupRef} position={[0, -0.5, 0]}>
