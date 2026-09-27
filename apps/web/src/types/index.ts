@@ -148,27 +148,27 @@ export type BookingStatus =
   | "HANDOVER_INSPECTION"
   | "ACTIVE"
   | "RETURN_INITIATED"
-  | "RETURN_NOT_RECEIVED"
   | "OWNER_INSPECTION"
   | "DISPUTED"
-  | "NON_RETURNED"
   | "COMPLETED"
   | "CANCELLED";
 
 export type FinancialStatus =
   | "PENDING_PAYMENT"
+  | "NO_PAYMENT"        // cancelled before any payment
   | "FUNDS_HELD"
   | "RENT_RELEASED"
-  | "DEPOSIT_HELD"
   | "DEPOSIT_REFUNDED"
   | "DEPOSIT_TO_OWNER"
-  | "PARTIAL_SETTLEMENT";
+  | "PARTIAL_SETTLEMENT"
+  | "FULLY_REFUNDED";   // everything paid went back to the renter
 
-export type InspectionType = "RECEIVING" | "RETURN";
+export type InspectionType = "HANDOVER" | "RECEIVING" | "RETURN" | "OWNER_RECEIPT";
 export type InspectionStatus = "ACCEPTED" | "REPORTED_ISSUE";
 
 export type EvidenceStage =
   | "PRE_EXISTING"
+  | "HANDOVER"
   | "RECEIVING"
   | "RETURN"
   | "DAMAGE_CLAIM"
@@ -195,18 +195,28 @@ export type DisputeReason =
   | "INCORRECT_AMOUNT"
   | "OTHER";
 
+/** RETURN_CLAIM decisions split the deposit; HANDOVER_ISSUE decisions settle rent + transport too. */
 export type AdminDecision =
   | "REFUND_RENTER"
   | "PAY_OWNER"
   | "PARTIAL_SETTLEMENT"
-  | "REJECT_CLAIM";
+  | "REJECT_CLAIM"
+  | "FULL_REFUND"
+  | "REJECT_ISSUE"
+  | "PARTIAL_REFUND";
+
+export type DisputeKind = "HANDOVER_ISSUE" | "RETURN_CLAIM";
+export type DisputeStatus = "OPEN" | "ESCALATED" | "RESOLVED";
 
 export type PaymentTxType =
   | "ESCROW_DEPOSIT"
-  | "RENT_PAYOUT"
+  | "FULL_REFUND"
+  | "RENT_REFUND"
   | "DEPOSIT_REFUND"
-  | "DAMAGE_PAYOUT"
-  | "PARTIAL_SETTLEMENT";
+  | "RENT_PAYOUT"
+  | "DAMAGE_PAYOUT";
+
+export type PaymentDirection = "IN" | "TO_RENTER" | "TO_OWNER";
 
 export type ActorRole = "OWNER" | "RENTER" | "ADMIN" | "SYSTEM";
 
@@ -253,9 +263,14 @@ export interface Dispute {
   id: string;
   bookingId: string;
   damageClaimId: string | null;
-  status: "OPEN" | "RESOLVED";
+  kind: DisputeKind;
+  raisedByRole: "OWNER" | "RENTER" | "SYSTEM";
+  status: DisputeStatus;
+  responseDeadline: string | null;
+  escalatedAt: string | null;
   renterResponse: string | null;
-  renterReason: DisputeReason | null;
+  renterReason: DisputeReason | "MISSING_QUANTITY" | "CONDITION_MISMATCH" | null;
+  ownerResponse: string | null;
   adminDecision: AdminDecision | null;
   resolutionAmountPaise: number | null;
   resolutionNotes: string | null;
@@ -268,9 +283,14 @@ export interface PaymentTransaction {
   id: string;
   bookingId: string;
   type: PaymentTxType;
+  direction: PaymentDirection;
   amountPaise: number;
-  status: "PENDING" | "COMPLETED" | "FAILED";
+  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   providerReference: string | null;
+  razorpayRefundId: string | null;
+  utrReference: string | null;
+  failureReason: string | null;
+  processedAt: string | null;
   createdAt: string;
 }
 
@@ -321,6 +341,22 @@ export interface BookingRequest {
   ownerInspectionDeadline: string | null;
   completedAt: string | null;
   nonReturnReportedAt: string | null;
+  acceptedAt: string | null;
+  paymentDeadline: string | null;
+  fundedAt: string | null;
+  handoverDeadline: string | null;
+  ownerReceiptDeadline: string | null;
+  cancelledAt: string | null;
+  cancelledBy: "RENTER" | "OWNER" | "SYSTEM" | null;
+  rejectionReason?: string | null;
+
+  /** Only present for the renter, while escrow is funded and handover is pending. */
+  handoverCode?: string | null;
+  handoverCodeAttempts: number;
+
+  receivedQuantity: number | null;
+  returnedQuantity: number | null;
+  ownerReceivedQuantity: number | null;
 
   createdAt: string;
   updatedAt: string;
@@ -378,20 +414,34 @@ export interface CreateBookingRequestInput {
   transportDistanceKm?: number;
 }
 
+export interface HandoverInput {
+  handoverCode: string;
+  evidenceUrls: string[];
+  notes?: string;
+}
+
+export interface OwnerHandoverResponseInput {
+  action: "ACCEPT" | "CONTEST";
+  notes?: string;
+}
+
 export interface RenterReceivingInspectionInput {
   status: "ACCEPTED" | "REPORTED_ISSUE";
+  receivedQuantity?: number;
   notes?: string;
   evidenceUrls?: string[];
   issueDescription?: string;
 }
 
 export interface ReturnInitiationInput {
+  returnedQuantity?: number;
   notes?: string;
   returnEvidenceUrls: string[];
 }
 
 export interface OwnerReceiptInput {
   received: boolean;
+  receivedQuantity?: number;
   notes?: string;
 }
 

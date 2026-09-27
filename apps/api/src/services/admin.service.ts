@@ -4,7 +4,8 @@ import jwt from "jsonwebtoken";
 import { prisma } from "../config/database.js";
 import { env } from "../config/env.js";
 import { AuthService, JWT_ISSUER, SALT_ROUNDS } from "./auth.service.js";
-import { notFound, unauthorized } from "../utils/http-error.js";
+import { TERMINAL_BOOKING_STATUSES } from "./booking-rules.js";
+import { badRequest, conflict, notFound, unauthorized } from "../utils/http-error.js";
 import { notifyKycEvent } from "./notifications/account-notifications.js";
 import { disconnectUser } from "./notifications/realtime.service.js";
 import { pageArgs, toPage, type Pagination } from "../utils/pagination.js";
@@ -112,7 +113,86 @@ export class AdminService {
       ...pageArgs(page),
     });
 
-    return toPage(rows, page);
+    // Open bookings per user, so the panel can warn before suspending someone mid-rental.
+    const businessIds = rows.flatMap((u) => u.businesses.map((b) => b.id));
+    const openCounts = new Map<string, number>();
+    if (businessIds.length) {
+      const open = await prisma.bookingRequest.findMany({
+        where: {
+          bookingStatus: { notIn: TERMINAL_BOOKING_STATUSES },
+          OR: [{ seekerId: { in: businessIds } }, { providerId: { in: businessIds } }],
+        },
+        select: { seekerId: true, providerId: true },
+      });
+      for (const b of open) {
+        for (const id of new Set([b.seekerId, b.providerId])) openCounts.set(id, (openCounts.get(id) ?? 0) + 1);
+      }
+    }
+
+    return toPage(
+      rows.map((u) => ({ ...u, openBookings: u.businesses.reduce((n, b) => n + (openCounts.get(b.id) ?? 0), 0) })),
+      page
+    );
+  }
+
+  /**
+   * Suspend a verified user: every session is revoked at once and their
+   * listings disappear from the marketplace. Open bookings are left for admin
+   * to handle through the dispute console.
+   */
+  static async suspendUser(userId: string, reason: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw notFound("User not found");
+    if (user.verificationStatus !== "VERIFIED") throw conflict("Only verified users can be suspended");
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { verificationStatus: "SUSPENDED", verificationNotes: reason },
+      select: USER_LIST_SELECT,
+    });
+    await AuthService.revokeAllSessions(userId);
+    disconnectUser(userId);
+    return updated;
+  }
+
+  /** Lift a suspension. */
+  static async reinstateUser(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw notFound("User not found");
+    if (user.verificationStatus !== "SUSPENDED") throw conflict("Only suspended users can be reinstated");
+    return prisma.user.update({
+      where: { id: userId },
+      data: { verificationStatus: "VERIFIED", verificationNotes: null },
+      select: USER_LIST_SELECT,
+    });
+  }
+
+  // ── Dispute console ───────────────────────────────────────
+
+  /** Disputes with everything admin needs to decide them. */
+  static async listDisputes(status: "OPEN" | "ESCALATED" | "RESOLVED" | "ALL" = "ALL") {
+    if (!["OPEN", "ESCALATED", "RESOLVED", "ALL"].includes(status)) throw badRequest("Invalid dispute status filter");
+    const statusFilter = status === "ALL" ? {} : { status };
+
+    const disputes = await prisma.dispute.findMany({
+      where: statusFilter,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        damageClaim: true,
+        booking: {
+          include: {
+            resource: { select: { id: true, name: true, resourceType: true, photos: true } },
+            seeker:   { select: { id: true, name: true, city: true } },
+            provider: { select: { id: true, name: true, city: true } },
+            inspections: { orderBy: { createdAt: "asc" } },
+            evidence:    { orderBy: { createdAt: "asc" } },
+            timelineEvents: { orderBy: { createdAt: "asc" } },
+            paymentTransactions: { orderBy: { createdAt: "asc" } },
+          },
+        },
+      },
+    });
+    return disputes.map(({ booking: { handoverCode: _secret, ...booking }, ...d }) => ({ ...d, booking }));
   }
 
   /** Approve a user — flips verificationStatus to VERIFIED */
@@ -145,32 +225,17 @@ export class AdminService {
 
   /** Dashboard summary counts */
   static async getSummary() {
-    const [pending, verified, rejected, totalResources, totalBookings, openDisputes] = await Promise.all([
+    const [pending, verified, rejected, suspended, totalResources, totalBookings, openDisputes, pendingPayouts, failedRefunds] = await Promise.all([
       prisma.user.count({ where: { verificationStatus: "PENDING" } }),
       prisma.user.count({ where: { verificationStatus: "VERIFIED" } }),
       prisma.user.count({ where: { verificationStatus: "REJECTED" } }),
+      prisma.user.count({ where: { verificationStatus: "SUSPENDED" } }),
       prisma.resource.count({ where: { deletedAt: null } }),
       prisma.bookingRequest.count(),
-      prisma.bookingRequest.count({ where: { bookingStatus: "DISPUTED" } }),
+      prisma.dispute.count({ where: { status: { in: ["OPEN", "ESCALATED"] } } }),
+      prisma.paymentTransaction.count({ where: { direction: "TO_OWNER", status: "PENDING" } }),
+      prisma.paymentTransaction.count({ where: { direction: "TO_RENTER", status: "FAILED" } }),
     ]);
-    return { pending, verified, rejected, totalResources, totalBookings, openDisputes };
-  }
-
-  /** Disputed bookings awaiting a Customer Care decision */
-  static async listDisputes(page: Pagination) {
-    const rows = await prisma.bookingRequest.findMany({
-      where: { bookingStatus: "DISPUTED" },
-      include: {
-        resource: { select: { id: true, name: true, resourceType: true } },
-        seeker: { select: { id: true, name: true } },
-        provider: { select: { id: true, name: true } },
-        damageClaims: { orderBy: { createdAt: "desc" } },
-        disputes: { orderBy: { createdAt: "desc" } },
-        evidence: { orderBy: { createdAt: "asc" } },
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      ...pageArgs(page),
-    });
-    return toPage(rows, page);
+    return { pending, verified, rejected, suspended, totalResources, totalBookings, openDisputes, pendingPayouts, failedRefunds };
   }
 }

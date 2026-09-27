@@ -232,6 +232,16 @@ export class AuthService {
       return fetch(url, { ...options, headers });
     }
 
+    // Suspended or rejected after signing in → end the session right away.
+    if (response.status === 403) {
+      const code: string = await response.clone().json().then((b) => b?.error?.code ?? "", () => "");
+      if (code.startsWith("ACCOUNT_")) {
+        this.clearAuth();
+        if (isBrowser()) window.location.href = `/login?reason=${encodeURIComponent(code.toLowerCase())}`;
+        throw new Error("Your account is no longer active.");
+      }
+    }
+
     return response;
   }
 

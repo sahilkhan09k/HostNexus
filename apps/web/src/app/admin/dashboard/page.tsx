@@ -7,17 +7,20 @@ import {
   ShieldCheck, Clock, CheckCircle2, XCircle, Users, Package,
   CalendarDays, LogOut, Eye, ChevronDown, ChevronUp,
   ExternalLink, AlertTriangle, RefreshCw, Loader2, X, FileText,
+  Ban, RotateCcw, Scale, Banknote,
 } from "lucide-react";
 import { AdminAuthService, type AdminUser, type PendingUser, type AdminSummary } from "@/lib/admin-auth";
 import { cn } from "@/lib/utils";
-import { DisputesPanel } from "./disputes-panel";
+import { DisputesPanel } from "./_components/disputes-panel";
+import { PayoutsPanel } from "./_components/payouts-panel";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
-type Tab = "PENDING" | "VERIFIED" | "REJECTED" | "DISPUTES";
-type ActionState = { id: string; type: "approve" | "reject" } | null;
+type Tab = "PENDING" | "VERIFIED" | "REJECTED" | "SUSPENDED";
+type Section = "BUSINESSES" | "DISPUTES" | "PAYOUTS";
+type ActionState = { id: string; type: "approve" | "reject" | "suspend" | "reinstate" } | null;
 
-const STATUS_CONFIG: Record<"PENDING" | "VERIFIED" | "REJECTED", {
+const STATUS_CONFIG: Record<Tab, {
   label: string;
   icon: React.FC<{ className?: string }>;
   color: string;
@@ -27,6 +30,7 @@ const STATUS_CONFIG: Record<"PENDING" | "VERIFIED" | "REJECTED", {
   PENDING:  { label: "Pending",  icon: Clock,         color: "text-amber-600",   bg: "bg-amber-100",   border: "border-amber-200"  },
   VERIFIED: { label: "Verified", icon: CheckCircle2,  color: "text-green-600", bg: "bg-green-100", border: "border-green-200" },
   REJECTED: { label: "Rejected", icon: XCircle,       color: "text-rose-600",    bg: "bg-rose-100",    border: "border-rose-200"   },
+  SUSPENDED: { label: "Suspended", icon: Ban,         color: "text-stone-700",   bg: "bg-stone-200",   border: "border-stone-300"  },
 };
 
 function StatCard({ label, value, icon: Icon, color, bg }: {
@@ -48,6 +52,7 @@ function StatCard({ label, value, icon: Icon, color, bg }: {
 function DocLink({ url, label }: { url: string | null; label: string }) {
   if (!url) return <span className="text-xs text-stone-400 italic">Not provided</span>;
 
+  // KYC documents are private: fetched with the admin token, never linked directly
   if (url.startsWith("/kyc/")) {
     return (
       <button
@@ -75,11 +80,15 @@ function UserRow({
   user,
   onApprove,
   onReject,
+  onSuspend,
+  onReinstate,
   actionState,
 }: {
   user: PendingUser;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  onSuspend: (user: PendingUser) => void;
+  onReinstate: (id: string) => void;
   actionState: ActionState;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -161,6 +170,34 @@ function UserRow({
             </>
           )}
 
+          {user.openBookings > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+              {user.openBookings} open booking{user.openBookings === 1 ? "" : "s"}
+            </span>
+          )}
+
+          {user.verificationStatus === "VERIFIED" && (
+            <button
+              onClick={() => onSuspend(user)}
+              disabled={isActing}
+              className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+            >
+              {isActing && actionState?.type === "suspend" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
+              Suspend
+            </button>
+          )}
+
+          {user.verificationStatus === "SUSPENDED" && (
+            <button
+              onClick={() => onReinstate(user.id)}
+              disabled={isActing}
+              className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {isActing && actionState?.type === "reinstate" ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+              Reinstate
+            </button>
+          )}
+
           <button
             onClick={() => setExpanded((e) => !e)}
             className="flex h-8 w-8 items-center justify-center rounded-xl border border-stone-200 text-stone-400 hover:bg-stone-50 hover:text-stone-600 transition-colors"
@@ -228,7 +265,10 @@ function UserRow({
 
                 {user.verificationNotes && (
                   <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-rose-600">Verification Notes</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-rose-600">
+                      {user.verificationStatus === "SUSPENDED" ? "Suspension Reason"
+                        : user.verificationStatus === "REJECTED" ? "Rejection Reason" : "Verification Notes"}
+                    </p>
                     <p className="mt-1 text-xs text-rose-700">{user.verificationNotes}</p>
                   </div>
                 )}
@@ -299,6 +339,67 @@ function RejectModal({
   );
 }
 
+function SuspendModal({
+  user,
+  onConfirm,
+  onCancel,
+}: {
+  user: PendingUser;
+  onConfirm: (id: string, reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2, ease: EASE }}
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Ban className="h-4 w-4 text-stone-700" />
+            <h2 className="text-sm font-bold text-stone-900">Suspend {user.businesses[0]?.name ?? user.email}</h2>
+          </div>
+          <button onClick={onCancel} className="text-stone-400 hover:text-stone-600"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5">
+          <p className="text-sm text-stone-600">
+            They are signed out on their next request and their listings disappear from the marketplace.
+          </p>
+          {user.openBookings > 0 && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <strong>{user.openBookings} booking{user.openBookings === 1 ? " is" : "s are"} still in progress.</strong> The other
+              party can&apos;t finish them with this business while it is suspended; resolve them from the Disputes tab if needed.
+            </p>
+          )}
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="Reason (shown to the user when they try to sign in)"
+            className="w-full resize-none rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm"
+          />
+        </div>
+        <div className="flex gap-2 border-t border-stone-100 px-5 py-4">
+          <button onClick={onCancel} className="flex-1 rounded-xl border border-stone-200 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(user.id, reason.trim())}
+            disabled={reason.trim().length < 5}
+            className="flex-1 rounded-xl bg-stone-900 py-2.5 text-sm font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+          >
+            Suspend Account
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 const subscribeToStorage = (onChange: () => void) => {
   window.addEventListener("storage", onChange);
   return () => window.removeEventListener("storage", onChange);
@@ -331,6 +432,8 @@ export default function AdminDashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionState, setActionState] = useState<ActionState>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<PendingUser | null>(null);
+  const [section, setSection] = useState<Section>("BUSINESSES");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // Guard: redirect to login if no token
@@ -338,6 +441,7 @@ export default function AdminDashboardPage() {
     if (!AdminAuthService.isLoggedIn()) router.replace("/admin/login");
   }, [router]);
 
+  // Stable identity: the panels load data in effects that depend on it
   const showToast = useCallback((msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -349,7 +453,7 @@ export default function AdminDashboardPage() {
     try {
       const [sum, userList] = await Promise.all([
         AdminAuthService.getSummary(),
-        tab === "DISPUTES" ? Promise.resolve([] as PendingUser[]) : AdminAuthService.getUsers(tab),
+        AdminAuthService.getUsers(tab),
       ]);
       setSummary(sum);
       setUsers(userList);
@@ -399,6 +503,33 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSuspendConfirm = async (id: string, reason: string) => {
+    setSuspendTarget(null);
+    setActionState({ id, type: "suspend" });
+    try {
+      await AdminAuthService.suspendUser(id, reason);
+      showToast("Account suspended.", "success");
+      await loadData(true);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Suspension failed", "error");
+    } finally {
+      setActionState(null);
+    }
+  };
+
+  const handleReinstate = async (id: string) => {
+    setActionState({ id, type: "reinstate" });
+    try {
+      await AdminAuthService.reinstateUser(id);
+      showToast("Account reinstated.", "success");
+      await loadData(true);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Reinstate failed", "error");
+    } finally {
+      setActionState(null);
+    }
+  };
+
   const handleLogout = async () => {
     await AdminAuthService.logout();
     router.push("/admin/login");
@@ -408,7 +539,13 @@ export default function AdminDashboardPage() {
     { key: "PENDING",  label: "Pending Review", count: summary?.pending },
     { key: "VERIFIED", label: "Verified",        count: summary?.verified },
     { key: "REJECTED", label: "Rejected",        count: summary?.rejected },
-    { key: "DISPUTES", label: "Disputes",        count: summary?.openDisputes },
+    { key: "SUSPENDED", label: "Suspended",      count: summary?.suspended },
+  ];
+
+  const SECTIONS: { key: Section; label: string; icon: React.FC<{ className?: string }>; badge?: number }[] = [
+    { key: "BUSINESSES", label: "Businesses", icon: Users },
+    { key: "DISPUTES", label: "Disputes", icon: Scale, badge: summary?.openDisputes },
+    { key: "PAYOUTS", label: "Payouts & Refunds", icon: Banknote, badge: (summary?.pendingPayouts ?? 0) + (summary?.failedRefunds ?? 0) },
   ];
 
   return (
@@ -441,6 +578,13 @@ export default function AdminDashboardPage() {
             userId={rejectTarget}
             onConfirm={handleRejectConfirm}
             onCancel={() => setRejectTarget(null)}
+          />
+        )}
+        {suspendTarget && (
+          <SuspendModal
+            user={suspendTarget}
+            onConfirm={handleSuspendConfirm}
+            onCancel={() => setSuspendTarget(null)}
           />
         )}
       </AnimatePresence>
@@ -486,12 +630,39 @@ export default function AdminDashboardPage() {
         {/* Page title */}
         <div className="mb-6">
           <h1 className="font-display text-3xl font-semibold text-stone-900">
-            Business Verification Dashboard
+            HostNexus Operations
           </h1>
           <p className="mt-1 text-sm text-stone-500">
-            Review KYC documents and approve or reject business registrations.
+            Verify businesses, decide disputes, and settle escrow payouts.
           </p>
         </div>
+
+        {/* Section switcher */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          {SECTIONS.map(({ key, label, icon: SIcon, badge }) => (
+            <button
+              key={key}
+              onClick={() => setSection(key)}
+              className={cn(
+                "flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all",
+                section === key ? "border-stone-900 bg-stone-900 text-white" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+              )}
+            >
+              <SIcon className="h-4 w-4" />
+              {label}
+              {!!badge && (
+                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-bold", section === key ? "bg-white/20" : "bg-rose-100 text-rose-700")}>
+                  {badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {section === "DISPUTES" && <DisputesPanel onToast={showToast} />}
+        {section === "PAYOUTS" && <PayoutsPanel onToast={showToast} />}
+
+        {section === "BUSINESSES" && (<>
 
         {/* Summary stats */}
         {loading && !summary ? (
@@ -536,10 +707,8 @@ export default function AdminDashboardPage() {
           ))}
         </div>
 
-        {/* User list / disputes */}
-        {tab === "DISPUTES" ? (
-          <DisputesPanel onChanged={() => loadData(true)} showToast={showToast} />
-        ) : loading ? (
+        {/* User list */}
+        {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-20 animate-pulse rounded-2xl bg-stone-100" />
@@ -562,12 +731,15 @@ export default function AdminDashboardPage() {
                   user={user}
                   onApprove={handleApprove}
                   onReject={(id) => setRejectTarget(id)}
+                  onSuspend={(u) => setSuspendTarget(u)}
+                  onReinstate={handleReinstate}
                   actionState={actionState}
                 />
               ))}
             </AnimatePresence>
           </div>
         )}
+        </>)}
       </main>
     </div>
   );

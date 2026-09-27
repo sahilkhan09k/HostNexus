@@ -20,20 +20,24 @@ export type BookingEvent =
   | { kind: "REQUESTED" }
   | { kind: "ACCEPTED" }
   | { kind: "REJECTED" }
-  | { kind: "CANCELLED"; refundedPaise: number }
+  | { kind: "CANCELLED"; by: PartyRole; refundedPaise: number }
+  | { kind: "EXPIRED"; reason: "REQUEST" | "PAYMENT" }
+  | { kind: "OWNER_NO_SHOW"; refundedPaise: number }
   | { kind: "PAYMENT_RECEIVED" }
+  | { kind: "LATE_PAYMENT_REFUNDED"; refundedPaise: number }
   | { kind: "HANDOVER_STARTED"; deadline: Date }
   | { kind: "RENT_RELEASED"; auto: boolean }
-  | { kind: "HANDOVER_ISSUE" }
+  | { kind: "HANDOVER_ISSUE"; responseDeadline: Date }
+  | { kind: "HANDOVER_ISSUE_CONTESTED" }
   | { kind: "RETURN_INITIATED"; early: boolean }
-  | { kind: "RETURN_RECEIVED"; deadline: Date }
-  | { kind: "RETURN_NOT_RECEIVED" }
+  | { kind: "RETURN_RECEIVED"; deadline: Date; auto?: boolean }
+  | { kind: "RETURN_NOT_RECEIVED"; responseDeadline: Date }
   | { kind: "RETURN_ACCEPTED"; auto: boolean }
-  | { kind: "DAMAGE_CLAIMED"; amountPaise: number }
-  | { kind: "CLAIM_ACCEPTED"; payoutPaise: number; refundPaise: number }
+  | { kind: "DAMAGE_CLAIMED"; amountPaise: number; responseDeadline: Date }
+  | { kind: "CLAIM_ACCEPTED"; payoutPaise: number; refundPaise: number; auto?: boolean }
   | { kind: "CLAIM_DISPUTED" }
   | { kind: "DISPUTE_RESOLVED"; decision: string }
-  | { kind: "NON_RETURN_REPORTED" }
+  | { kind: "NON_RETURN_REPORTED"; bySystem: boolean; responseDeadline: Date | null }
   | { kind: "NEGOTIATION_OFFER"; by: PartyRole; amountPaise: number; message?: string | null }
   | { kind: "NEGOTIATION_ACCEPTED"; by: PartyRole; amountPaise: number }
   | { kind: "NEGOTIATION_REJECTED"; by: PartyRole };
@@ -78,7 +82,13 @@ const DECISION_TEXT: Record<string, string> = {
   REJECT_CLAIM: "the claim was rejected and the full deposit is refunded to the renter",
   PAY_OWNER: "the security deposit is paid to the owner",
   PARTIAL_SETTLEMENT: "the security deposit is split between both parties",
+  FULL_REFUND: "the handover issue was upheld and the renter is refunded in full",
+  REJECT_ISSUE: "the handover issue was rejected, rent is paid to the owner and the rental continues",
+  PARTIAL_REFUND: "part of the rent is refunded to the renter and the rental continues",
 };
+
+/** Handover-issue decisions that keep the rental going (the rest close the booking) */
+const ONGOING_DECISIONS = new Set(["REJECT_ISSUE", "PARTIAL_REFUND"]);
 
 // ── Context ────────────────────────────────────────────────────────────
 
@@ -191,17 +201,50 @@ export function buildBookingNotifications(ctx: BookingContext, event: BookingEve
         `${owner} declined your request for ${item}.${ctx.rejectionReason ? ` Reason: "${clip(ctx.rejectionReason)}"` : ""}`);
       break;
 
-    case "CANCELLED":
-      to("OWNER", "BOOKING_CANCELLED", "Booking cancelled",
-        `${renter} cancelled their booking for ${item} (${dates}).${event.refundedPaise > 0 ? ` The escrow payment of ${rupees(event.refundedPaise)} was refunded to them.` : ""}`);
+    case "CANCELLED": {
+      const refund = event.refundedPaise > 0 ? ` The escrow payment of ${rupees(event.refundedPaise)} is being refunded to the renter.` : "";
+      if (event.by === "RENTER") {
+        to("OWNER", "BOOKING_CANCELLED", "Booking cancelled",
+          `${renter} cancelled their booking for ${item} (${dates}).${refund}`);
+      } else {
+        to("RENTER", "BOOKING_CANCELLED", "Booking cancelled by the owner",
+          `${owner} cancelled your booking for ${item} (${dates}).${ctx.rejectionReason ? ` Reason: "${clip(ctx.rejectionReason)}"` : ""}${refund}`);
+      }
+      break;
+    }
+
+    case "EXPIRED":
+      if (event.reason === "REQUEST") {
+        to("RENTER", "BOOKING_EXPIRED", "Booking request expired",
+          `${owner} did not respond to your request for ${item} before the start date, so it expired.`);
+        to("OWNER", "BOOKING_EXPIRED", "Booking request expired",
+          `The request from ${renter} for ${item} expired because it was not answered before the start date.`);
+      } else {
+        to("RENTER", "BOOKING_EXPIRED", "Unpaid booking cancelled",
+          `Your booking for ${item} was cancelled because escrow was not funded before the payment deadline.`);
+        to("OWNER", "BOOKING_EXPIRED", "Unpaid booking cancelled",
+          `${renter} did not pay for ${item} before the deadline, so the booking was cancelled and the units released.`);
+      }
+      break;
+
+    case "OWNER_NO_SHOW":
+      to("RENTER", "OWNER_NO_SHOW", "Owner did not hand over — full refund",
+        `${owner} did not hand over ${item} by the deadline. Your payment of ${rupees(event.refundedPaise)} is being refunded in full.`);
+      to("OWNER", "OWNER_NO_SHOW", "Booking cancelled — handover missed",
+        `You did not hand over ${item} to ${renter} by the deadline, so the booking was cancelled and the renter refunded. This counts as an owner cancellation.`);
+      break;
+
+    case "LATE_PAYMENT_REFUNDED":
+      to("RENTER", "PAYMENT_REFUNDED", "Payment refunded",
+        `Your payment of ${rupees(event.refundedPaise)} for ${item} arrived after the booking was closed, so it is being refunded in full.`);
       break;
 
     case "PAYMENT_RECEIVED":
       to("OWNER", "PAYMENT_RECEIVED", "Payment received — ready for handover",
-        `${renter} paid ${rupees(ctx.totalAmountPaise)} into escrow for ${item}. Hand over the resource and mark the handover in HostNexus.`,
+        `${renter} paid ${rupees(ctx.totalAmountPaise)} into escrow for ${item}. At handover, ask the renter for their 6-digit handover code and enter it in HostNexus with condition photos.`,
         { details: [...baseDetails, { label: "Held in escrow", value: rupees(ctx.totalAmountPaise) }] });
       to("RENTER", "PAYMENT_CONFIRMED", "Payment confirmed",
-        `Your payment of ${rupees(ctx.totalAmountPaise)} for ${item} is held safely in escrow.`);
+        `Your payment of ${rupees(ctx.totalAmountPaise)} for ${item} is held safely in escrow. Share your 6-digit handover code (shown on the booking) with the owner only when you receive the item.`);
       break;
 
     case "HANDOVER_STARTED":
@@ -223,7 +266,13 @@ export function buildBookingNotifications(ctx: BookingContext, event: BookingEve
 
     case "HANDOVER_ISSUE":
       to("OWNER", "HANDOVER_ISSUE_REPORTED", "Issue reported at handover",
-        `${renter} reported a problem with ${item} during their receiving inspection. The booking is in dispute and escrow is frozen until Customer Care reviews it.`);
+        `${renter} reported a problem with ${item} during their receiving inspection. Accept it (full refund to the renter) or contest it before ${time(event.responseDeadline)}, ${day(event.responseDeadline)}. If you do not respond, the renter is refunded automatically.`,
+        { ctaLabel: "Respond to issue" });
+      break;
+
+    case "HANDOVER_ISSUE_CONTESTED":
+      to("RENTER", "HANDOVER_ISSUE_CONTESTED", "Owner contested your handover issue",
+        `${owner} contested the issue you reported for ${item}. HostNexus admin will review the evidence from both sides; your payment stays in escrow.`);
       break;
 
     case "RETURN_INITIATED":
@@ -234,12 +283,13 @@ export function buildBookingNotifications(ctx: BookingContext, event: BookingEve
 
     case "RETURN_RECEIVED":
       to("RENTER", "RETURN_RECEIVED", "Return received by owner",
-        `${owner} confirmed receiving ${item}. If no damage is reported by ${time(event.deadline)}, your deposit of ${rupees(ctx.securityDepositPaise)} is refunded automatically.`);
+        `${event.auto ? `${owner} did not confirm within 24 hours, so receipt of ${item} was confirmed automatically.` : `${owner} confirmed receiving ${item}.`} If no damage is reported by ${time(event.deadline)}, your deposit of ${rupees(ctx.securityDepositPaise)} is refunded automatically.`);
       break;
 
     case "RETURN_NOT_RECEIVED":
       to("RENTER", "RETURN_NOT_RECEIVED", "Owner has not received your return",
-        `${owner} reported that ${item} was not received. The booking is now in dispute and Customer Care will review it.`);
+        `${owner} reported that ${item} was not received. Accept the claim or dispute it before ${time(event.responseDeadline)}, ${day(event.responseDeadline)}; otherwise the deposit goes to the owner.`,
+        { ctaLabel: "Respond to claim" });
       break;
 
     case "RETURN_ACCEPTED":
@@ -256,32 +306,40 @@ export function buildBookingNotifications(ctx: BookingContext, event: BookingEve
 
     case "DAMAGE_CLAIMED":
       to("RENTER", "DAMAGE_CLAIM_FILED", "Damage claim filed",
-        `${owner} filed a claim of ${rupees(event.amountPaise)} against your deposit for ${item}. Accept the deduction or dispute it.`,
+        `${owner} filed a claim of ${rupees(event.amountPaise)} against your deposit for ${item}. Accept the deduction or dispute it before ${time(event.responseDeadline)}, ${day(event.responseDeadline)}; otherwise the claim is accepted automatically.`,
         { details: [...baseDetails, { label: "Amount claimed", value: rupees(event.amountPaise) }], ctaLabel: "Respond to claim" });
       break;
 
     case "CLAIM_ACCEPTED":
       to("OWNER", "DAMAGE_CLAIM_ACCEPTED", "Damage claim accepted",
-        `${renter} accepted your claim for ${item}. ${rupees(event.payoutPaise)} is paid to you${event.refundPaise > 0 ? ` and ${rupees(event.refundPaise)} is refunded to the renter` : ""}.`);
+        `${event.auto ? `${renter} did not respond in time, so your claim for ${item} was accepted.` : `${renter} accepted your claim for ${item}.`} ${rupees(event.payoutPaise)} is paid to you${event.refundPaise > 0 ? ` and ${rupees(event.refundPaise)} is refunded to the renter` : ""}.`);
       break;
 
     case "CLAIM_DISPUTED":
       to("OWNER", "DAMAGE_CLAIM_DISPUTED", "Damage claim disputed",
-        `${renter} disputed your claim for ${item}. Customer Care will review the evidence from both sides.`);
+        `${renter} disputed your claim for ${item}. HostNexus admin will review the evidence from both sides.`);
       break;
 
     case "DISPUTE_RESOLVED": {
       const outcome = DECISION_TEXT[event.decision] ?? "the settlement has been applied";
       for (const role of ["OWNER", "RENTER"] as const) {
         to(role, "DISPUTE_RESOLVED", "Dispute resolved",
-          `Customer Care resolved the dispute on ${item}: ${outcome}. The booking is now complete.`);
+          `The dispute on ${item} was resolved: ${outcome}.${ONGOING_DECISIONS.has(event.decision) ? "" : " The booking is now closed."}`);
       }
       break;
     }
 
     case "NON_RETURN_REPORTED":
-      to("RENTER", "NON_RETURN_REPORTED", "Non-return reported",
-        `${owner} reported that ${item} was not returned after the rental period. Your deposit is held and Customer Care will review the case.`);
+      if (event.bySystem) {
+        for (const role of ["OWNER", "RENTER"] as const) {
+          to(role, "NON_RETURN_REPORTED", "Return overdue — sent to admin",
+            `No return was started for ${item} within 24 hours after the last rental day. The deposit is held and HostNexus admin will review the case.`);
+        }
+      } else {
+        to("RENTER", "NON_RETURN_REPORTED", "Non-return reported",
+          `${owner} reported that ${item} was not returned after the rental period. Respond${event.responseDeadline ? ` before ${time(event.responseDeadline)}, ${day(event.responseDeadline)}` : ""}; otherwise the deposit goes to the owner.`,
+          { ctaLabel: "Respond to claim" });
+      }
       break;
 
     case "NEGOTIATION_OFFER":

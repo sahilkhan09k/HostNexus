@@ -38,6 +38,7 @@ interface Reputation {
   resourcesGiven: number;
   resourcesTaken: number;
   completedBookings: number;
+  ownerCancellations: number;
   totalReviews: number;
   recentReviews: {
     rating: number; reviewerRole: string; comment: string | null;
@@ -286,6 +287,12 @@ function OwnerProfileCard({ businessId, businessName, city, state, businessType 
               </div>
             ))}
           </div>
+
+          {rep.ownerCancellations > 0 && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+              This owner cancelled {rep.ownerCancellations} accepted booking{rep.ownerCancellations === 1 ? "" : "s"} (renters were refunded in full).
+            </p>
+          )}
 
           {/* Recent review snippet */}
           {rep.recentReviews.length > 0 && (

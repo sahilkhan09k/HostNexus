@@ -1,23 +1,30 @@
 import { BookingService } from "../services/booking.service.js";
+import { PaymentService } from "../services/payment.service.js";
 
 let intervalId: NodeJS.Timeout | null = null;
+
+/** One tick: enforce every expired booking deadline, then retry queued/failed refunds. */
+async function tick(): Promise<void> {
+  await BookingService.processDeadlines();
+  await PaymentService.processRefunds();
+}
 
 export function startInspectionWorker(intervalMs: number = 30000): void {
   if (intervalId) return;
 
-  console.log(`[InspectionWorker] Starting automated inspection deadline monitor (interval: ${intervalMs / 1000}s)`);
+  console.log(`[DeadlineWorker] Starting booking deadline & refund monitor (interval: ${intervalMs / 1000}s)`);
 
   // Run immediately on boot
-  BookingService.processExpiredInspections().catch((err) => {
-    console.error("[InspectionWorker] Initial inspection check error:", err);
+  tick().catch((err) => {
+    console.error("[DeadlineWorker] Initial run error:", err);
   });
 
   // Run periodically
   intervalId = setInterval(async () => {
     try {
-      await BookingService.processExpiredInspections();
+      await tick();
     } catch (err) {
-      console.error("[InspectionWorker] Error running processExpiredInspections:", err);
+      console.error("[DeadlineWorker] Error:", err);
     }
   }, intervalMs);
 }
@@ -26,6 +33,6 @@ export function stopInspectionWorker(): void {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    console.log("[InspectionWorker] Stopped automated inspection deadline monitor");
+    console.log("[DeadlineWorker] Stopped booking deadline & refund monitor");
   }
 }

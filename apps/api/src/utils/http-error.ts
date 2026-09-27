@@ -22,3 +22,4 @@ export const forbidden    = (message: string, code = "FORBIDDEN")    => httpErro
 export const notFound     = (message: string, code = "NOT_FOUND")    => httpError(404, code, message);
 export const conflict     = (message: string, code = "CONFLICT")     => httpError(409, code, message);
 export const unprocessable = (message: string, code = "UNPROCESSABLE") => httpError(422, code, message);
+export const badGateway   = (message: string, code = "PAYMENT_PROVIDER_ERROR") => httpError(502, code, message);

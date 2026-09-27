@@ -324,6 +324,10 @@ export class AuthService {
       throw forbidden("Your account verification was rejected. Please contact support.", "ACCOUNT_REJECTED");
     }
 
+    if (user.verificationStatus === "SUSPENDED") {
+      throw forbidden("Your account has been suspended. Please contact support.", "ACCOUNT_SUSPENDED");
+    }
+
     const tokens = await this.generateTokenPair(user.id, user.tokenVersion);
     return {
       user: this.sanitizeUser(user),

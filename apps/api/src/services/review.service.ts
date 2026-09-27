@@ -38,7 +38,7 @@ export async function getBusinessReputation(businessId: string) {
     arr.length ? +(arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1) : null;
 
   // Booking counts
-  const [resourcesGiven, resourcesTaken, completedBookings] = await Promise.all([
+  const [resourcesGiven, resourcesTaken, completedBookings, ownerCancellations] = await Promise.all([
     // resources this business OWNED that reached COMPLETED
     prisma.bookingRequest.count({
       where: { providerId: businessId, bookingStatus: "COMPLETED" },
@@ -54,6 +54,10 @@ export async function getBusinessReputation(businessId: string) {
         bookingStatus: "COMPLETED",
       },
     }),
+    // accepted bookings this business cancelled as the owner (incl. no-shows)
+    prisma.bookingRequest.count({
+      where: { providerId: businessId, cancelledBy: "OWNER", acceptedAt: { not: null } },
+    }),
   ]);
 
   return {
@@ -66,6 +70,7 @@ export async function getBusinessReputation(businessId: string) {
     resourcesGiven,     // times this biz successfully rented out a resource
     resourcesTaken,     // times this biz successfully rented in a resource
     completedBookings,
+    ownerCancellations, // times this biz cancelled or failed to hand over after accepting
     recentReviews: reviews.slice(0, 10).map(r => ({
       rating:       r.rating,
       reviewerRole: r.reviewerRole,

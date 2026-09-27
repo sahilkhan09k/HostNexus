@@ -33,6 +33,19 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  // Signed out by the API because the account was suspended / rejected meanwhile
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    // One-time read of the redirect reason after mount (window isn't available during SSR)
+    if (reason === "account_suspended") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError("Your account has been suspended, so you were signed out. Please contact support@hostnexus.in.");
+    } else if (reason === "account_rejected") {
+      setErrorCode("ACCOUNT_REJECTED");
+      setError("Your account verification was rejected.");
+    }
+  }, []);
+
   // Show nothing while checking auth state
   if (isLoading) return null;
 

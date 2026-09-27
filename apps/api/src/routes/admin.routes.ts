@@ -16,12 +16,22 @@ router.get("/summary", AdminController.getSummary);
 router.get("/users", AdminController.listUsers);
 router.patch("/users/:id/approve", AdminController.approveUser);
 router.patch("/users/:id/reject", AdminController.rejectUser);
+router.patch("/users/:id/suspend", AdminController.suspendUser);
+router.patch("/users/:id/reinstate", AdminController.reinstateUser);
+
+// Dispute console
+router.get("/disputes", AdminController.listDisputes);
+router.post("/disputes/:bookingId/resolve", AdminController.resolveDispute);
+
+// Escrow ledger: owner payouts (settled manually with a UTR) and renter refunds (Razorpay)
+router.get("/transactions", AdminController.listTransactions);
+router.post("/transactions/:id/mark-paid", AdminController.markPayoutPaid);
+router.post("/transactions/:id/retry", AdminController.retryRefund);
 
 // Private KYC documents (never served from /uploads)
 router.get("/kyc/:file", AdminController.getKycDocument);
 
-// Customer Care dispute resolution
-router.get("/disputes", AdminController.listDisputes);
+// Older path for the same action
 router.post("/bookings/:id/resolve-dispute", AdminController.resolveDispute);
 
 export default router;

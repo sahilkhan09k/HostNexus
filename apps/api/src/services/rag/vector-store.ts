@@ -141,7 +141,7 @@ export class VectorStoreService {
   public static async syncAllResources(): Promise<void> {
     try {
       const rawResources = await prisma.resource.findMany({
-        where: { isActive: true },
+        where: { isActive: true, deletedAt: null, business: { owner: { verificationStatus: "VERIFIED" } } },
         include: {
           business: {
             select: {

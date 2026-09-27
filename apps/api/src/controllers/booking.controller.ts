@@ -5,6 +5,8 @@ import {
   updateBookingStatusSchema,
   bookingQuerySchema,
   renterReceivingInspectionSchema,
+  handoverSchema,
+  ownerHandoverResponseSchema,
   returnInitiationSchema,
   ownerReceiptSchema,
   ownerDamageClaimSchema,
@@ -70,7 +72,7 @@ export class BookingController {
         return;
       }
 
-      // Scoped to the renter/owner — anyone else gets the same 404 as a missing id
+      // Only the renter and the owner can see a booking; everyone else gets 404.
       const bookingRequest = await BookingService.getBookingRequestById(id, userId);
       if (!bookingRequest) {
         res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Booking request not found" } });
@@ -196,11 +198,12 @@ export class BookingController {
         return;
       }
 
-      const booking = await BookingService.markHandover(id, userId);
+      const input   = handoverSchema.parse(req.body);
+      const booking = await BookingService.markHandover(id, userId, input);
       res.status(200).json({
         success: true,
         data: { booking },
-        message: "Resource handover initiated. 1-hour inspection window active.",
+        message: "Handover verified. The renter's 1-hour inspection window has started.",
       });
     } catch (error) {
       next(error);
@@ -225,7 +228,32 @@ export class BookingController {
         data: { booking },
         message: input.status === "ACCEPTED"
           ? "Resource accepted. Rent released to owner."
-          : "Handover issue reported. Dispute opened.",
+          : "Handover issue reported. The owner has 24 hours to respond.",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** POST /api/bookings/:id/handover-response — owner accepts or contests a renter's handover issue */
+  static async ownerHandoverResponse(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.userId;
+      const id     = req.params.id as string;
+      if (!userId) {
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "User not authenticated" } });
+        return;
+      }
+
+      const input   = ownerHandoverResponseSchema.parse(req.body);
+      const booking = await BookingService.ownerRespondHandoverIssue(id, userId, input);
+
+      res.status(200).json({
+        success: true,
+        data: { booking },
+        message: input.action === "ACCEPT"
+          ? "Issue accepted. The renter is being refunded in full."
+          : "Issue contested. Sent to HostNexus admin for a decision.",
       });
     } catch (error) {
       next(error);
@@ -350,8 +378,8 @@ export class BookingController {
         success: true,
         data: { booking },
         message: input.action === "ACCEPT"
-          ? "Claim accepted and settled."
-          : "Claim disputed. Sent to Customer Care.",
+          ? "Claim accepted and settled from the deposit."
+          : "Claim disputed. Sent to HostNexus admin for a decision.",
       });
     } catch (error) {
       next(error);
@@ -372,7 +400,7 @@ export class BookingController {
       res.status(200).json({
         success: true,
         data: { booking },
-        message: "Non-return reported. Dispute filed and sent to Customer Care.",
+        message: "Non-return reported. The renter has 48 hours to respond before the deposit is paid to you.",
       });
     } catch (error) {
       next(error);
