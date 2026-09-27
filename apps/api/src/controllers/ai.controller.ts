@@ -21,7 +21,8 @@ const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const conciergeContextSchema = z.object({
   v: z.literal(1),
   lastIntent: z.enum([
-    "listing_inquiry", "damage_inquiry", "policy_question", "negotiation_inquiry", "payment_escrow_inquiry", "general_faq",
+    "listing_inquiry", "damage_inquiry", "policy_question", "negotiation_inquiry", "payment_escrow_inquiry",
+    "weather_inquiry", "general_faq",
   ]).optional(),
   lastUserMessage: z.string().max(2000).optional(),
   search: z.object({
@@ -41,6 +42,11 @@ const conciergeContextSchema = z.object({
     endDate: isoDay.optional(),
   }).optional(),
   resultIds: z.array(z.string().max(40)).max(20).optional(),
+  weather: z.object({
+    location: z.object({ label: z.string().max(80), city: z.string().max(60).optional() }),
+    startDate: isoDay.optional(),
+    endDate: isoDay.optional(),
+  }).optional(),
 });
 
 const conciergeQuerySchema = z.object({

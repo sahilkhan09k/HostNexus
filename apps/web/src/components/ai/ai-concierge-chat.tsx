@@ -9,10 +9,10 @@ import {
   Send, Sparkles, User, MapPin, Star,
   Users, ArrowUpRight, RotateCcw,
   ShieldCheck, HelpCircle, AlertTriangle, Layers,
-  ChevronRight, ExternalLink
+  ChevronRight, ExternalLink, CloudSun, Droplets, Wind
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { queryAiConcierge, type AiListingResult, type AiConciergeContext } from "@/lib/api-client";
+import { queryAiConcierge, type AiListingResult, type AiConciergeContext, type AiWeatherReport } from "@/lib/api-client";
 
 const EASE: Easing = [0.22, 1, 0.36, 1];
 
@@ -24,6 +24,8 @@ export interface ChatMessage {
   sources?: string[];
   suggestedFollowUps?: string[];
   intent?: string;
+  /** Live forecast for weather questions and outdoor searches */
+  weather?: AiWeatherReport;
   /** Welcome, reset and error notices are UI-only and not sent as conversation history */
   excludeFromHistory?: boolean;
   /** Server signature of an assistant reply; unsigned assistant turns are ignored by the API */
@@ -56,6 +58,11 @@ const DEFAULT_SUGGESTIONS = [
     badge: "Negotiation",
   },
   {
+    category: "Weather Check",
+    text: "Will it rain in Pune this weekend?",
+    badge: "Live Forecast",
+  },
+  {
     category: "Venue Search",
     text: "Find a banquet hall for 300 guests in Pune under ₹50,000",
     badge: "Marketplace",
@@ -73,7 +80,7 @@ function TypingDots() {
           transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
         />
       ))}
-      <span className="ml-2 text-xs font-medium text-stone-400">Searching live inventory & policies...</span>
+      <span className="ml-2 text-xs font-medium text-stone-400">Checking live inventory, policies & weather...</span>
     </div>
   );
 }
@@ -188,6 +195,97 @@ function parseInlineMarkdown(text: string) {
 
     return part;
   });
+}
+
+function weatherDayLabel(iso: string, today: string) {
+  if (iso === today) return "Today";
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** At-a-glance forecast strip; the full numbers and advice are in the reply text */
+function WeatherCard({ weather }: { weather: AiWeatherReport }) {
+  const days = weather.days.length > 0 ? weather.days : weather.lastYear ?? [];
+  const isHistory = weather.days.length === 0;
+  if (!weather.current && days.length === 0) return null;
+  const region = [weather.place.state !== weather.place.name ? weather.place.state : undefined, weather.place.country]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: EASE }}
+      className="mt-3 overflow-hidden rounded-2xl border border-sky-200/80 bg-gradient-to-br from-sky-50 to-white shadow-xs"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 px-4 py-2.5">
+        <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
+          <CloudSun className="h-4 w-4 text-sky-600" />
+          {weather.place.name}
+          {region && <span className="text-xs font-medium text-stone-500">{region}</span>}
+        </div>
+        <span className="text-[10px] font-medium text-stone-400">
+          {isHistory ? "Last year · observed" : `${weather.source} forecast`}
+        </span>
+      </div>
+
+      {weather.current && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 text-xs text-stone-600">
+          <span className="text-2xl leading-none">{weather.current.emoji}</span>
+          <span className="text-xl font-black text-stone-900">{Math.round(weather.current.tempC)}°C</span>
+          <span className="font-medium">{weather.current.summary}</span>
+          {weather.current.humidity !== null && (
+            <span className="flex items-center gap-1"><Droplets className="h-3 w-3 text-sky-500" />{weather.current.humidity}%</span>
+          )}
+          <span className="flex items-center gap-1"><Wind className="h-3 w-3 text-stone-400" />{weather.current.windKmh} km/h</span>
+          {weather.airQuality && (
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                weather.airQuality.usAqi <= 100
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : weather.airQuality.usAqi <= 150
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+              )}
+            >
+              AQI {weather.airQuality.usAqi} · {weather.airQuality.label}
+            </span>
+          )}
+        </div>
+      )}
+
+      {days.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto px-4 py-3">
+          {days.map((d) => {
+            const wet = (d.precipProbability ?? 0) >= 60 || d.precipMm >= 5 || d.thunder;
+            return (
+              <div
+                key={d.date}
+                className={cn(
+                  "min-w-[76px] shrink-0 rounded-xl border px-2 py-2 text-center",
+                  wet ? "border-sky-300 bg-sky-100/70" : "border-stone-200 bg-white"
+                )}
+                title={d.summary}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wide text-stone-500">
+                  {weatherDayLabel(d.date, weather.today)}
+                </div>
+                <div className="my-1 text-xl leading-none">{d.emoji}</div>
+                <div className="text-xs font-bold text-stone-900">
+                  {Math.round(d.tempMaxC)}° <span className="font-medium text-stone-400">{Math.round(d.tempMinC)}°</span>
+                </div>
+                <div className="mt-0.5 flex items-center justify-center gap-0.5 text-[10px] font-medium text-sky-700">
+                  <Droplets className="h-2.5 w-2.5" />
+                  {d.precipProbability !== null ? `${d.precipProbability}%` : `${d.precipMm} mm`}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 function ResourceResultCard({ result, index }: { result: AiListingResult; index: number }) {
@@ -330,7 +428,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         `* **Find & Order Inventory**: *e.g., "I want to order 30 chairs, 40 tables on 28th October"*\n` +
         `* **Explain Rules & Damage Protocol**: *e.g., "What will happen if my product gets damage?"*\n` +
         `* **Financial Security**: *e.g., "How does escrow payment and deposit refund work?"*\n` +
-        `* **B2B Bulk Negotiation**: *e.g., "Can I negotiate price with equipment owners?"*`,
+        `* **B2B Bulk Negotiation**: *e.g., "Can I negotiate price with equipment owners?"*\n` +
+        `* **Live Weather for Your Event**: *e.g., "Will it rain in Pune on 28th October?"*`,
       excludeFromHistory: true,
       timestamp: new Date(),
     },
@@ -388,6 +487,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         sources: response.sources,
         suggestedFollowUps: response.suggestedFollowUps,
         intent: response.intent,
+        weather: response.weather,
         signature: response.replySignature,
         timestamp: new Date(),
       };
@@ -419,7 +519,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
         role: "assistant",
         content:
           `### 🔄 Chat Reset\n` +
-          `Ask me anything about marketplace listings, multi-item orders (chairs, tables, halls), damage policies, or escrow protections.`,
+          `Ask me anything about marketplace listings, multi-item orders (chairs, tables, halls), damage policies, escrow protections, or the weather for your event.`,
         excludeFromHistory: true,
         timestamp: new Date(),
       },
@@ -455,6 +555,9 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
             </div>
             <div className="flex items-center gap-2 text-xs text-stone-600 font-medium">
               <HelpCircle className="h-3.5 w-3.5 text-emerald-600" /> 4-Stage Chain of Custody
+            </div>
+            <div className="flex items-center gap-2 text-xs text-stone-600 font-medium">
+              <CloudSun className="h-3.5 w-3.5 text-emerald-600" /> Live Weather Forecasts
             </div>
           </div>
         </div>
@@ -557,6 +660,8 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
                         <p className="text-sm leading-relaxed">{msg.content}</p>
                       )}
                     </div>
+
+                    {msg.weather && <WeatherCard weather={msg.weather} />}
 
                     {/* Listings: exact matches first, then clearly labelled alternatives */}
                     {msg.results && msg.results.length > 0 && (() => {

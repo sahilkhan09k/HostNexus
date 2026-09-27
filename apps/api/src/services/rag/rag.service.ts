@@ -7,6 +7,9 @@ import {
   fromSearchContext,
   type ConciergeContext,
 } from "./conversation.js";
+import { parseLocation, type ParsedRequest } from "./request-parser.js";
+import { WeatherService, OUTDOOR_WORDS, isWeatherQuery, parseWeatherDates, type WeatherReport } from "./weather.service.js";
+import { composeWeatherFailure, composeWeatherNote, composeWeatherReply, weatherFollowUps } from "./weather-answer.js";
 import type { 
   RagQueryInput, 
   RagResponse, 
@@ -18,6 +21,11 @@ import type {
 const LLM_TIMEOUT_MS = 20_000;
 const LLM_MAX_TOKENS = 1500;
 
+/** A weather question that is really about platform policy ("what if it rains — do I get a refund?") */
+const WEATHER_POLICY_Q = /\b(what happens|what if|polic(?:y|ies)|cancel\w*|refunds?|compensat\w*|insurance|liab\w*|responsible)\b/;
+/** Follow-ups that point back at the event being planned ("will it rain that day?") */
+const EVENT_REF = /\b(then|that day|those days|the day|same day|on the day|event|booking|my dates?|those dates|for it)\b/;
+
 export class RagService {
   /**
    * Main entry point for the HostNexus RAG pipeline
@@ -28,6 +36,12 @@ export class RagService {
 
     // 1. Detect the message's stand-alone intent
     const intent = this.classifyIntent(userMessage);
+
+    // Weather questions ("will it rain in Pune on 28th?") and weather follow-ups
+    // ("and tomorrow?", "what about Mumbai?") are answered from a live forecast.
+    if (intent === "weather_inquiry" || this.isWeatherFollowUp(userMessage, intent, ctx)) {
+      return this.weatherResponse(userMessage, input);
+    }
 
     // 2. Resolve it against the conversation so far: a refinement of the last
     //    search ("what about Mumbai?"), a new item for the same event ("and 40
@@ -44,10 +58,11 @@ export class RagService {
         : followUp.carried.length > 0 ? `Using your earlier details: ${followUp.carried.join(" · ")}.`
         : undefined;
       const answer = await ListingRetriever.answerRequest(followUp.request, { dateOverride: input.date, preface });
-      return this.inventoryResponse(answer, "listing_inquiry", userMessage, {
+      const response = this.inventoryResponse(answer, "listing_inquiry", userMessage, {
         search: answer.request.requirements.length > 0 ? toSearchContext(answer.request) : ctx?.search,
         resultIds: answer.results.map((r) => r.id),
       });
+      return this.withWeatherNote(response, answer.request, userMessage);
     }
 
     if (followUp.kind === "ABOUT_RESULTS") {
@@ -66,7 +81,7 @@ export class RagService {
     // A policy follow-up ("and who decides?") continues the previous topic
     const isPolicyFollowUp =
       intent === "policy_question" &&
-      !!ctx?.lastIntent && ctx.lastIntent !== "listing_inquiry" &&
+      !!ctx?.lastIntent && ctx.lastIntent !== "listing_inquiry" && ctx.lastIntent !== "weather_inquiry" &&
       this.looksLikeFollowUp(userMessage);
     const policyIntent: QueryIntent = isPolicyFollowUp ? ctx!.lastIntent! : intent;
     const retrievalQuery = isPolicyFollowUp && ctx?.lastUserMessage ? `${ctx.lastUserMessage} ${userMessage}` : userMessage;
@@ -114,6 +129,131 @@ export class RagService {
       suggestedFollowUps: this.generateFollowUps(policyIntent, userMessage, matchingListings),
       referencedPolicies: retrievedDocs.map(d => d.document.section),
       context: nextContext,
+    };
+  }
+
+  // ─── Weather ──────────────────────────────────────────────────────────
+
+  /**
+   * A short message right after a weather answer that only changes the place
+   * or the dates ("and tomorrow?", "what about Mumbai?", "next weekend?").
+   */
+  private static isWeatherFollowUp(message: string, intent: QueryIntent, ctx: ConciergeContext | undefined): boolean {
+    if (ctx?.lastIntent !== "weather_inquiry" || !ctx.weather) return false;
+    if (intent !== "policy_question" && intent !== "general_faq") return false;
+    const lower = message.toLowerCase();
+    if (lower.split(/\s+/).length > 8 || WEATHER_POLICY_Q.test(lower)) return false;
+    return !!(parseWeatherDates(message) || parseLocation(message));
+  }
+
+  /**
+   * Where and when a weather question is about: what the message says, else
+   * the last weather lookup, else the event being planned (last search).
+   */
+  private static weatherCriteria(message: string, input: RagQueryInput) {
+    const ctx = input.context;
+    const lower = message.toLowerCase();
+    const said = parseLocation(message);
+    const location =
+      said ??
+      (input.location ? { label: input.location } : undefined) ??
+      ctx?.weather?.location ??
+      ctx?.search?.location;
+
+    let range = parseWeatherDates(message);
+    if (!range) {
+      const prevWeather = ctx?.lastIntent === "weather_inquiry" ? ctx.weather : undefined;
+      const search = ctx?.search;
+      const sameAsEvent = !said || (!!search?.location && sameLocation(said, search.location));
+      // "and Mumbai?" keeps the dates just asked about; a full new question doesn't
+      const shortFollowUp = lower.split(/\s+/).length <= 5;
+      if (prevWeather?.startDate && (!said || shortFollowUp)) {
+        range = { start: prevWeather.startDate, end: prevWeather.endDate ?? prevWeather.startDate };
+      } else if (search?.startDate && sameAsEvent && (EVENT_REF.test(lower) || !said)) {
+        range = { start: search.startDate, end: search.endDate ?? search.startDate };
+      }
+    }
+    return { location, range };
+  }
+
+  private static async weatherResponse(message: string, input: RagQueryInput): Promise<RagResponse> {
+    const ctx = input.context;
+    const { location, range } = this.weatherCriteria(message, input);
+    const base = {
+      results: [] as ResourceResultCard[],
+      intent: "weather_inquiry" as QueryIntent,
+      referencedPolicies: [],
+    };
+    const memory: ConciergeContext = {
+      v: 1,
+      lastIntent: "weather_inquiry",
+      lastUserMessage: message,
+      search: ctx?.search,
+      resultIds: ctx?.resultIds,
+    };
+
+    if (!location) {
+      return {
+        ...base,
+        reply: composeWeatherFailure({ ok: false, reason: "NO_LOCATION" }),
+        sources: [],
+        suggestedFollowUps: ["Weather in Mumbai this weekend", "Will it rain in Pune tomorrow?", "Weather in Delhi next week"],
+        context: memory,
+      };
+    }
+
+    const lookup = await WeatherService.lookup(location, range);
+    const weatherMemory = {
+      location: { label: location.label, ...(location.city ? { city: location.city } : {}) },
+      startDate: range?.start,
+      endDate: range?.end,
+    };
+    if (!lookup.ok) {
+      return {
+        ...base,
+        reply: composeWeatherFailure(lookup),
+        sources: [],
+        suggestedFollowUps: weatherFollowUps(undefined, lookup.place ?? location.label),
+        context: { ...memory, weather: weatherMemory },
+      };
+    }
+    const report = lookup.report;
+    return {
+      ...base,
+      reply: composeWeatherReply(report),
+      sources: [`${report.source} forecast · ${report.place.name}`],
+      suggestedFollowUps: weatherFollowUps(report),
+      weather: report,
+      context: { ...memory, weather: weatherMemory },
+    };
+  }
+
+  /**
+   * Inventory searches for outdoor setups (lawns, tents, "open-air") or that
+   * also ask about the weather get the forecast for the event's place and dates.
+   * Best effort: a slow or failed lookup never holds back the listings.
+   */
+  private static async withWeatherNote(response: RagResponse, request: ParsedRequest, message: string): Promise<RagResponse> {
+    const lower = message.toLowerCase();
+    const asked = isWeatherQuery(message);
+    const outdoor = OUTDOOR_WORDS.test(lower) || request.requirements.some((r) => r.key === "lawn" || r.key === "tent");
+    if (!(asked || outdoor) || !request.location || !request.startDate) return response;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const lookup = await Promise.race([
+      WeatherService.lookup(request.location, { start: request.startDate, end: request.endDate ?? request.startDate }),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 6_000); }),
+    ]).catch(() => null).finally(() => clearTimeout(timer));
+    if (!lookup || !lookup.ok) return response;
+    // Unasked, a "not forecast yet" note is just noise
+    if (!asked && lookup.report.days.length === 0) return response;
+
+    const report: WeatherReport = lookup.report;
+    return {
+      ...response,
+      reply: `${response.reply}\n${composeWeatherNote(report)}`,
+      sources: [...response.sources, `${report.source} forecast · ${report.place.name}`],
+      weather: report,
     };
   }
 
@@ -178,6 +318,11 @@ export class RagService {
     const namesItem = ListingRetriever.mentionsCatalogItem(lower);
     if (!namesItem && has(/\b(escrow|razorpay|refunds?|payments?|pay|deposit)\b/)) {
       return "payment_escrow_inquiry";
+    }
+    // "Weather in Pune tomorrow?", "will it rain on 28th?" — but not "50 chairs, will it rain?" (a search
+    // that also gets the forecast) or "what if it rains?" (a policy question)
+    if (!namesItem && isWeatherQuery(lower) && !WEATHER_POLICY_Q.test(lower)) {
+      return "weather_inquiry";
     }
 
     // Names a rentable item, or asks to rent / order something (but isn't a how-to question)
@@ -304,7 +449,8 @@ export class RagService {
       `I can help you with anything on the platform:\n` +
       `* **Search Real Inventory**: Tell me what you need (e.g., "I need 30 chairs and 40 tables for Oct 28th" or "Find a commercial kitchen in Mumbai")\n` +
       `* **Explain Policies**: Ask questions like "What happens if my product gets damaged?" or "How does the security deposit work?"\n` +
-      `* **Negotiation & Escrow**: Learn how to request bulk discounts and how payments are protected.`
+      `* **Negotiation & Escrow**: Learn how to request bulk discounts and how payments are protected.\n` +
+      `* **Live Weather**: Check the forecast for your event (e.g., "Will it rain in Pune on 28th October?")`
     );
   }
 
@@ -493,4 +639,8 @@ ${knowledgeContext || "None"}`;
       "How do I negotiate prices with owners?"
     ];
   }
+}
+
+function sameLocation(a: { label: string; city?: string }, b: { label: string; city?: string }) {
+  return a.city && b.city ? a.city === b.city : a.label.toLowerCase() === b.label.toLowerCase();
 }

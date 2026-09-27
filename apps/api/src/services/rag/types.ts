@@ -1,4 +1,5 @@
 import type { ConciergeContext } from "./conversation.js";
+import type { WeatherReport } from "./weather.service.js";
 
 export interface ChatHistoryMessage {
   role: "user" | "assistant" | "system";
@@ -88,6 +89,7 @@ export type QueryIntent =
   | "policy_question" 
   | "negotiation_inquiry" 
   | "payment_escrow_inquiry" 
+  | "weather_inquiry"
   | "general_faq";
 
 export interface RagResponse {
@@ -97,6 +99,8 @@ export interface RagResponse {
   sources: string[];
   suggestedFollowUps: string[];
   referencedPolicies?: string[];
+  /** Live forecast shown with the reply (weather questions and outdoor bookings) */
+  weather?: WeatherReport;
   /** Send this back with the next message so follow-ups are understood */
   context?: ConciergeContext;
 }

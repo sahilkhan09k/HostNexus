@@ -472,6 +472,37 @@ export interface AiListingResult {
   photos: string[];
 }
 
+export interface AiWeatherDay {
+  /** IST calendar day, "YYYY-MM-DD" */
+  date: string;
+  summary: string;
+  emoji: string;
+  tempMaxC: number;
+  tempMinC: number;
+  precipMm: number;
+  /** % chance of rain; null when the provider doesn't give one */
+  precipProbability: number | null;
+  windMaxKmh: number;
+  uvIndexMax: number | null;
+  thunder: boolean;
+}
+
+/** Live forecast returned with weather answers and outdoor searches */
+export interface AiWeatherReport {
+  place: { name: string; state?: string; country?: string; latitude: number; longitude: number };
+  source: string;
+  fetchedAt: string;
+  today: string;
+  requestedStart: string;
+  requestedEnd: string;
+  horizonEnd: string;
+  current?: { tempC: number; feelsLikeC: number | null; humidity: number | null; windKmh: number; summary: string; emoji: string };
+  airQuality?: { usAqi: number; pm25: number | null; label: string };
+  days: AiWeatherDay[];
+  lastYear?: AiWeatherDay[];
+  advice: Array<{ level: "good" | "caution" | "warning"; text: string; itemKey?: string }>;
+}
+
 export interface AiConciergeResponse {
   reply: string;
   /** Server signature of this reply — send it back with the turn in `history` */
@@ -482,6 +513,7 @@ export interface AiConciergeResponse {
   sources: string[];
   suggestedFollowUps: string[];
   referencedPolicies?: string[];
+  weather?: AiWeatherReport;
 }
 
 export async function queryAiConcierge(input: AiConciergeQueryInput): Promise<AiConciergeResponse> {
