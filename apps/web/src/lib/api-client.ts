@@ -442,6 +442,7 @@ export interface AiListingResult {
   location: string;
   price: string;
   rentAmountPaise: number;
+  pricingBasis?: string;
   securityDepositPaise: number;
   securityDeposit: string;
   capacity: string;
@@ -532,3 +533,51 @@ export async function queryAiConcierge(input: AiConciergeQueryInput): Promise<Ai
   return data.data;
 }
 
+
+// ─── Booking weather check ───────────────────────────────────────────────
+
+export type WeatherImpactLevel = "none" | "low" | "moderate" | "high";
+
+export interface BookingWeatherImpact {
+  area: "rental" | "transport";
+  level: Exclude<WeatherImpactLevel, "none">;
+  title: string;
+  detail: string;
+  dates: string[];
+}
+
+export interface BookingWeatherCheck {
+  resourceId: string;
+  resourceType: string;
+  location: string;
+  source: string;
+  fetchedAt: string;
+  startDate: string;
+  endDate: string;
+  horizonEnd: string;
+  coverage: "full" | "partial" | "none";
+  days: AiWeatherDay[];
+  lastYear?: AiWeatherDay[];
+  transport: { relevant: boolean; mode: "SELF" | "PROVIDER"; ownerProvides: boolean; dates: string[] };
+  overall: WeatherImpactLevel;
+  impacts: BookingWeatherImpact[];
+}
+
+export type BookingWeatherResult =
+  | { ok: true; check: BookingWeatherCheck }
+  | { ok: false; reason: "NO_LOCATION" | "PLACE_NOT_FOUND" | "UNAVAILABLE" | "PAST_DATES"; location?: string };
+
+/** Forecast for the chosen booking dates and its impact on the rental and its transport (public). */
+export async function getBookingWeather(
+  resourceId: string,
+  startDate: string,
+  endDate: string,
+  transport: "SELF" | "PROVIDER",
+  signal?: AbortSignal,
+): Promise<BookingWeatherResult> {
+  const params = new URLSearchParams({ startDate, endDate, transport });
+  const res = await fetch(`${API_BASE_URL}/api/resources/${encodeURIComponent(resourceId)}/weather-impact?${params}`, { signal });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error?.message || "Weather check failed");
+  return body.data;
+}

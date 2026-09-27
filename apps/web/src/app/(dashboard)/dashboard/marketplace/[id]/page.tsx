@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { WeatherImpactPanel } from "@/components/marketplace/weather-impact-panel";
 import { MAX_HOURS_PER_DAY, PRICING_BASIS_OPTION, PRICING_BASIS_UNIT, rentBreakdown, rentFor, toPricingBasis } from "@/lib/pricing";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -536,6 +537,9 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
 
           {renderTransport()}
 
+          <WeatherImpactPanel resourceId={resource.id} startDate={start} endDate={end}
+            transportMode={usingOwnerTransport ? "PROVIDER" : "SELF"} />
+
           {/* Notes */}
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Special Requests (optional)</label>
@@ -616,6 +620,9 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
           {DateQtyInputs()}
 
           {renderTransport()}
+
+          <WeatherImpactPanel resourceId={resource.id} startDate={start} endDate={end}
+            transportMode={usingOwnerTransport ? "PROVIDER" : "SELF"} />
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Message to Owner (optional)</label>

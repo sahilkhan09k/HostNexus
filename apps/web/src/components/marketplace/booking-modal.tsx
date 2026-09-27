@@ -12,6 +12,7 @@ import {
 import { createBookingRequest, makeNegotiationOffer } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media";
+import { WeatherImpactPanel } from "./weather-impact-panel";
 import { MAX_HOURS_PER_DAY, PRICING_BASIS_UNIT, rentBreakdown, rentFor, toPricingBasis } from "@/lib/pricing";
 
 /** "YYYY-MM-DD" for the user's local calendar day (toISOString would give the UTC day). */
@@ -473,6 +474,9 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
 
                   {renderTransport()}
 
+                  <WeatherImpactPanel resourceId={resource.id} startDate={startDate} endDate={endDate}
+                    transportMode={usingOwnerTransport ? "PROVIDER" : "SELF"} />
+
                   {/* Escrow summary */}
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2 text-xs">
                     <div className="flex justify-between text-stone-600">
@@ -525,6 +529,9 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                   {DateQuantityRow()}
 
                   {renderTransport()}
+
+                  <WeatherImpactPanel resourceId={resource.id} startDate={startDate} endDate={endDate}
+                    transportMode={usingOwnerTransport ? "PROVIDER" : "SELF"} />
 
                   {/* Offer input */}
                   <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-4">
