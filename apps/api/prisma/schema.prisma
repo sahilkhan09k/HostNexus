@@ -482,3 +482,81 @@ model NegotiationOffer {
   @@map("negotiation_offers")
 }
 
+
+// ─────────────────────────────────────────
+// Weather-driven Digital Twin
+// ─────────────────────────────────────────
+
+// Geocoded city centroid (Open-Meteo geocoder). Used for weather lookups and the twin map only —
+// never for pricing or distance-based matching.
+model CityGeo {
+  key       String   @id // normalised city name, e.g. "mumbai"
+  name      String
+  state     String?
+  latitude  Float
+  longitude Float
+  updatedAt DateTime @updatedAt
+
+  @@map("city_geo")
+}
+
+// One row per city per day. ARCHIVE rows are observed history (model training),
+// FORECAST rows are overwritten on every refresh.
+model WeatherDaily {
+  id           String   @id @default(cuid())
+  cityKey      String
+  date         DateTime // 00:00 UTC of the local (IST) calendar day
+  source       String // ARCHIVE | FORECAST
+  precipMm     Float
+  precipHours  Float    @default(0)
+  maxIntensity Float    @default(0) // peak mm/h (forecast only; archive estimates it)
+  tempMaxC     Float
+  tempMinC     Float
+  windMaxKmh   Float
+  weatherCode  Int      @default(0)
+  fetchedAt    DateTime @default(now())
+
+  @@unique([cityKey, date])
+  @@index([date])
+  @@map("weather_daily")
+}
+
+// Public social / news reports about weather conditions in a city
+model SocialSignal {
+  id          String   @id @default(cuid())
+  source      String // REDDIT | NEWS
+  externalId  String   @unique
+  cityKey     String
+  title       String
+  url         String
+  publishedAt DateTime
+  category    String // FLOODING | ROAD_CLOSURE | EVENT_DISRUPTION | HEATWAVE | POWER_OUTAGE | STORM | GENERAL_WEATHER
+  severity    Float // 0..1
+  sentiment   Float    @default(0) // -1..1
+  classifier  String // LLM | RULES
+  createdAt   DateTime @default(now())
+
+  @@index([cityKey, publishedAt])
+  @@map("social_signals")
+}
+
+// Learned weather-response coefficients per twin segment (Bayesian GLM, Laplace approximation)
+model TwinModel {
+  key          String   @id // "<segment>:<target>", e.g. "outdoor_venue:demand"
+  mean         Float[]
+  covariance   Float[] // row-major k×k
+  observations Int      @default(0)
+  trainedAt    DateTime @default(now())
+
+  @@map("twin_models")
+}
+
+// Periodic snapshots of the live twin state (history of the evolving virtual system)
+model TwinSnapshot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  summary   Json
+
+  @@index([createdAt])
+  @@map("twin_snapshots")
+}
