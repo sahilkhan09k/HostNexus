@@ -135,7 +135,11 @@ export default function DashboardMarketplacePage() {
     } catch { /* silent */ } finally { setLoading(false); }
   }, [fetchWithAuth, filters.startDate, filters.endDate]);
 
-  useEffect(() => { fetchResources(); }, [fetchResources]);
+  useEffect(() => {
+    // Keep the loading indicator while date filters trigger a new request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchResources();
+  }, [fetchResources]);
 
   const filtered = useMemo(() => {
     let items = allResources;

@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -53,20 +55,19 @@ function MiniCalendar({ resourceId }: { resourceId: string }) {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [cal, setCal] = useState<CalendarData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { fetchWithAuth } = useAuth();
 
   const monthStr = `${year}-${String(month + 1).padStart(2, "0")}`;
 
   useEffect(() => {
-    setLoading(true);
     fetchWithAuth(`${API_BASE}/api/resources/${resourceId}/availability/calendar?month=${monthStr}`)
       .then(r => r.json()).then(b => { if (b.success) setCal(b.data); })
       .catch(() => {}).finally(() => setLoading(false));
   }, [resourceId, monthStr, fetchWithAuth]);
 
-  const prev = () => { if (month === 0) { setMonth(11); setYear(y => y-1); } else setMonth(m => m-1); };
-  const next = () => { if (month === 11) { setMonth(0); setYear(y => y+1); } else setMonth(m => m+1); };
+  const prev = () => { setLoading(true); if (month === 0) { setMonth(11); setYear(y => y-1); } else setMonth(m => m-1); };
+  const next = () => { setLoading(true); if (month === 11) { setMonth(0); setYear(y => y+1); } else setMonth(m => m+1); };
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -198,7 +199,7 @@ function OwnerCard({ businessId, businessName, city, state, businessType }: {
               <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-1.5">Latest Review</p>
               <Stars rating={rep.recentReviews[0].rating} />
               {rep.recentReviews[0].comment && (
-                <p className="mt-1.5 text-xs text-stone-600 leading-relaxed line-clamp-3">"{rep.recentReviews[0].comment}"</p>
+                <p className="mt-1.5 text-xs text-stone-600 leading-relaxed line-clamp-3">&quot;{rep.recentReviews[0].comment}&quot;</p>
               )}
               <p className="mt-1 text-[10px] text-stone-400">— {rep.recentReviews[0].reviewer.name}</p>
             </div>
@@ -283,8 +284,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
       }
       setSuccess("booked");
       setTimeout(() => router.push("/dashboard/bookings"), 1800);
-    } catch (err: any) {
-      setError(err.message ?? "Something went wrong");
+    } catch (err) {
+      setError(getErrorMessage(err, "Something went wrong"));
     } finally { setSubmitting(false); }
   };
 
@@ -330,8 +331,8 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
       }
       setSuccess("negotiated");
       setTimeout(() => router.push("/dashboard/bookings"), 1800);
-    } catch (err: any) {
-      setError(err.message ?? "Something went wrong");
+    } catch (err) {
+      setError(getErrorMessage(err, "Something went wrong"));
     } finally { setSubmitting(false); }
   };
 
@@ -499,7 +500,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             )}
           </div>
 
-          <DateQtyInputs />
+          {DateQtyInputs()}
 
           {renderTransport()}
 
@@ -521,7 +522,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(235,131,34,0.25)] hover:bg-emerald-700 transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Request to Book"}
           </button>
-          <p className="text-center text-[10px] text-stone-400">You'll be notified when the owner responds</p>
+          <p className="text-center text-[10px] text-stone-400">You&apos;ll be notified when the owner responds</p>
         </form>
       )}
 
@@ -580,7 +581,7 @@ function BookingPanel({ resource }: { resource: ResourceDetail }) {
             )}
           </div>
 
-          <DateQtyInputs />
+          {DateQtyInputs()}
 
           {renderTransport()}
 
@@ -634,7 +635,6 @@ export default function DashboardResourceDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
     fetchWithAuth(`${API_BASE}/api/resources/${id}`)
       .then(r => r.json())
       .then(body => {

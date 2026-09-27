@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -99,8 +101,8 @@ export default function EditResourcePage() {
         setDamagePhotos(found.damagePhotos || []);
         setTransportAvailable(Boolean(found.transportAvailable));
         setTransportRatePerKm((found.transportRatePerKmPaise || 0) / 100);
-      } catch (err: any) {
-        setFetchError(err.message || "Failed to load resource");
+      } catch (err) {
+        setFetchError(getErrorMessage(err, "Failed to load resource"));
       } finally {
         setFetchLoading(false);
       }
@@ -162,8 +164,8 @@ export default function EditResourcePage() {
       setTimeout(() => {
         router.push("/dashboard/inventory");
       }, 1200);
-    } catch (err: any) {
-      setSubmitError(err.message || "Something went wrong");
+    } catch (err) {
+      setSubmitError(getErrorMessage(err, "Something went wrong"));
     } finally {
       setIsSubmitting(false);
     }

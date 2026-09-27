@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useState } from "react";
 import { resourceFormSchema } from "@/schemas/resource.schema";
 import { AuthService } from "@/lib/auth";
@@ -239,8 +241,8 @@ export function useResourceForm(
       }
 
       setSubmitError(errorMessage);
-    } catch (err: any) {
-      setSubmitError(err.message || "Failed to save resource. Please check connection.");
+    } catch (err) {
+      setSubmitError(getErrorMessage(err, "Failed to save resource. Please check connection."));
     } finally {
       setIsSubmitting(false);
     }

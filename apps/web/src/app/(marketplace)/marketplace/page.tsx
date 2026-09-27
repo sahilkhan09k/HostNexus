@@ -193,7 +193,11 @@ function MarketplaceContent() {
     }
   }, [filters.startDate, filters.endDate]);
 
-  useEffect(() => { fetchResources(); }, [fetchResources]);
+  useEffect(() => {
+    // Keep the loading indicator while date filters trigger a new request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchResources();
+  }, [fetchResources]);
 
   // ── Client-side filter + sort (everything except dates, which are server-side) ──
   const filtered = useMemo(() => {

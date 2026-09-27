@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   Building2, Mail, Phone, MapPin,
   Globe, Rss, Send, MessageCircle,
@@ -82,14 +83,14 @@ export function Footer() {
 
           {/* Brand column */}
           <div className="col-span-2 md:col-span-3 lg:col-span-2">
-            <a href="/" className="inline-flex items-center gap-2">
+            <Link href="/" className="inline-flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900">
                 <Building2 className="h-4 w-4 text-white" strokeWidth={2.2} />
               </div>
               <span className="text-lg font-medium tracking-[-0.04em] text-stone-900">
                 HostNexus
               </span>
-            </a>
+            </Link>
 
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-stone-500">
               India&apos;s AI-powered B2B marketplace for hospitality resource sharing — connecting hotels,

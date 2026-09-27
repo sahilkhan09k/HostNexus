@@ -270,12 +270,12 @@ export class AuthService {
       // Surface verification-specific codes so the UI can react
       if (code === "ACCOUNT_PENDING") {
         const err = new Error(message);
-        (err as any).code = "ACCOUNT_PENDING";
+        Object.assign(err, { code: "ACCOUNT_PENDING" });
         throw err;
       }
       if (code === "ACCOUNT_REJECTED") {
         const err = new Error(message);
-        (err as any).code = "ACCOUNT_REJECTED";
+        Object.assign(err, { code: "ACCOUNT_REJECTED" });
         throw err;
       }
 

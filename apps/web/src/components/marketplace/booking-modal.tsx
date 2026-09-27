@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -117,8 +119,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
       });
       setSuccessState("booked");
       setTimeout(() => router.push("/dashboard/bookings"), 1500);
-    } catch (err: any) {
-      setErrorMessage(err.message || "Failed to submit booking request");
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err, "Failed to submit booking request"));
     } finally {
       setIsSubmitting(false);
     }
@@ -162,8 +164,8 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
 
       setSuccessState("negotiated");
       setTimeout(() => router.push("/dashboard/bookings"), 1800);
-    } catch (err: any) {
-      setErrorMessage(err.message || "Failed to submit negotiation");
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err, "Failed to submit negotiation"));
     } finally {
       setIsSubmitting(false);
     }
@@ -319,7 +321,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
             </div>
             <h3 className="text-lg font-bold text-stone-900">Booking Request Sent!</h3>
             <p className="text-xs text-stone-500 max-w-sm mx-auto">
-              The owner will review and respond. Once accepted, you'll fund the escrow to begin the chain of custody.
+              The owner will review and respond. Once accepted, you&apos;ll fund the escrow to begin the chain of custody.
             </p>
             <p className="text-xs text-stone-400">Redirecting to bookings…</p>
           </div>
@@ -430,7 +432,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
               {/* ── BOOK TAB ── */}
               {tab === "book" && (
                 <form onSubmit={handleBook} className="space-y-5">
-                  <DateQuantityRow />
+                  {DateQuantityRow()}
 
                   {renderTransport()}
 
@@ -463,7 +465,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                       className="w-full resize-none rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500" />
                   </div>
 
-                  <InspectionAck />
+                  {InspectionAck()}
 
                   <div className="flex items-center justify-end gap-3 pt-1">
                     <button type="button" onClick={onClose} disabled={isSubmitting}
@@ -483,7 +485,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
               {/* ── NEGOTIATE TAB ── */}
               {tab === "negotiate" && (
                 <form onSubmit={handleNegotiate} className="space-y-5">
-                  <DateQuantityRow />
+                  {DateQuantityRow()}
 
                   {renderTransport()}
 
@@ -566,7 +568,7 @@ export function BookingModal({ isOpen, onClose, resource }: BookingModalProps) {
                       className="w-full resize-none rounded-xl border border-stone-200 px-3 py-2 text-xs text-stone-800 focus:outline-emerald-500" />
                   </div>
 
-                  <InspectionAck />
+                  {InspectionAck()}
 
                   <div className="flex items-center justify-end gap-3 pt-1">
                     <button type="button" onClick={onClose} disabled={isSubmitting}

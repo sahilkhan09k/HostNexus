@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, type Easing } from "framer-motion";
@@ -306,7 +308,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
     if (!trimmed || isLoading) return;
 
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: "user",
       content: trimmed,
       timestamp: new Date(),
@@ -335,7 +337,7 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
       });
 
       const assistantMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: "assistant",
         content: response.reply,
         results: response.results,
@@ -347,14 +349,14 @@ export function AiConciergeChat({ title = "HostNexus AI Concierge" }: { title?: 
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err: any) {
+    } catch (err) {
       console.error("AI Concierge request failed:", err);
       const errorMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: "assistant",
         content:
           `### ⚠️ Connection Notice\n` +
-          `I couldn't reach the backend AI pipeline at this moment (${err?.message || "Network Error"}).\n` +
+          `I couldn't reach the backend AI pipeline at this moment (${getErrorMessage(err, "Network Error")}).\n` +
           `Please verify that the API server is running on \`http://localhost:5000\`.`,
         excludeFromHistory: true,
         timestamp: new Date(),

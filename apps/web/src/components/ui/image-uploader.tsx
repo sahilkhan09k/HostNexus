@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import React, { useState, useRef } from "react";
 import { Camera, Upload, X, Loader2, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { uploadMediaFile } from "@/lib/api-client";
@@ -55,8 +57,8 @@ export function ImageUploader({
         uploadedUrls.push(res.fileUrl);
       }
       onChange([...value, ...uploadedUrls]);
-    } catch (err: any) {
-      setErrorMessage(err.message || "Failed to upload media");
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err, "Failed to upload media"));
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

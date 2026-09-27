@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+
 import { useState, useEffect, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -103,7 +105,7 @@ export default function BookingsPage() {
 }
 
 function BookingsPageContent() {
-  const { user } = useAuth();
+  const { business } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -147,28 +149,30 @@ function BookingsPageContent() {
   const [negotiateAmountINR, setNegotiateAmountINR] = useState<number>(0);
   const [negotiateMessage, setNegotiateMessage] = useState("");
 
-  useEffect(() => {
-    fetchBookings();
-  }, [activeTab]);
-
   // Background refreshes (realtime updates) keep the current list on screen
   const fetchBookings = async (opts: { silent?: boolean } = {}) => {
     try {
       if (!opts.silent) setLoading(true);
-      setError("");
       const query: Record<string, string> = activeTab === "disputes" ? {} : { type: activeTab };
       const data = await getBookingRequests(query);
+      setError("");
       if (activeTab === "disputes") {
         setBookings(data.filter((b) => b.bookingStatus === "DISPUTED" || b.bookingStatus === "RETURN_NOT_RECEIVED"));
       } else {
         setBookings(data);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to load bookings");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to load bookings"));
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // The effect starts a request; its silent path updates state after the response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchBookings({ silent: true });
+  }, [activeTab]);
 
   const openDetail = async (id: string) => {
     setSelectedBookingId(id);
@@ -240,8 +244,8 @@ function BookingsPageContent() {
       await updateBookingStatus(id, "accepted");
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -256,8 +260,8 @@ function BookingsPageContent() {
       setRejectReason("");
       await fetchBookings();
       if (selectedBookingId === rejectModal.id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -269,8 +273,8 @@ function BookingsPageContent() {
       await payEscrow(id);
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -282,8 +286,8 @@ function BookingsPageContent() {
       await markHandover(id);
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -295,8 +299,8 @@ function BookingsPageContent() {
       await submitRenterInspection(id, { status: "ACCEPTED", notes: "Condition verified and accepted" });
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -315,8 +319,8 @@ function BookingsPageContent() {
       setHandoverIssueText("");
       setHandoverIssuePhotos([]);
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -334,8 +338,8 @@ function BookingsPageContent() {
       setReturnNotes("");
       setReturnPhotos([]);
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -347,8 +351,8 @@ function BookingsPageContent() {
       await submitOwnerReceipt(id, { received });
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -360,8 +364,8 @@ function BookingsPageContent() {
       await submitOwnerAcceptReturn(id, "Pristine return condition verified");
       await fetchBookings();
       if (selectedBookingId === id) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -382,8 +386,8 @@ function BookingsPageContent() {
       setClaimPhotos([]);
       setClaimAmountINR(0);
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -394,8 +398,8 @@ function BookingsPageContent() {
     try {
       await submitRenterClaimResponse(id, { action: "ACCEPT" });
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -415,8 +419,8 @@ function BookingsPageContent() {
       setRenterDisputeNotes("");
       setRenterDisputePhotos([]);
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -437,8 +441,8 @@ function BookingsPageContent() {
       setNegotiateAmountINR(0);
       setNegotiateMessage("");
       await refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -450,8 +454,8 @@ function BookingsPageContent() {
       await acceptNegotiationOffer(bookingId);
       await fetchBookings();
       if (selectedBookingId === bookingId) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -463,8 +467,8 @@ function BookingsPageContent() {
       await rejectNegotiation(bookingId, "Negotiation ended");
       await fetchBookings();
       if (selectedBookingId === bookingId) refreshDetail();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Action failed"));
     } finally {
       setActionLoading(null);
     }
@@ -540,7 +544,7 @@ function BookingsPageContent() {
         <div className="flex items-center gap-1 rounded-xl bg-stone-100 p-1 border border-stone-200">
           <button
             type="button"
-            onClick={() => setActiveTab("incoming")}
+            onClick={() => { setLoading(true); setActiveTab("incoming"); }}
             className={cn(
               "rounded-lg px-4 py-1.5 text-xs font-semibold transition-all",
               activeTab === "incoming"
@@ -552,7 +556,7 @@ function BookingsPageContent() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("outgoing")}
+            onClick={() => { setLoading(true); setActiveTab("outgoing"); }}
             className={cn(
               "rounded-lg px-4 py-1.5 text-xs font-semibold transition-all",
               activeTab === "outgoing"
@@ -564,7 +568,7 @@ function BookingsPageContent() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("disputes")}
+            onClick={() => { setLoading(true); setActiveTab("disputes"); }}
             className={cn(
               "rounded-lg px-4 py-1.5 text-xs font-semibold transition-all flex items-center gap-1.5",
               activeTab === "disputes"
@@ -675,7 +679,7 @@ function BookingsPageContent() {
                       <>
                         {/* If there's an open negotiation with a pending offer from renter, show negotiation actions */}
                         {b.negotiation?.status === "OPEN" && (() => {
-                          const pendingOffer = b.negotiation!.offers.find((o: any) => o.status === "PENDING");
+                          const pendingOffer = b.negotiation!.offers.find((o: NegotiationOffer) => o.status === "PENDING");
                           const isMyTurn = pendingOffer && pendingOffer.proposerRole === "SEEKER";
                           
                           if (isMyTurn) {
@@ -714,7 +718,7 @@ function BookingsPageContent() {
                           } else if (pendingOffer) {
                             return (
                               <span className="text-xs text-stone-500 bg-stone-100 px-3 py-1.5 rounded-lg">
-                                ⏳ Awaiting renter's response to your counter-offer
+                                ⏳ Awaiting renter&apos;s response to your counter-offer
                               </span>
                             );
                           }
@@ -722,7 +726,7 @@ function BookingsPageContent() {
                         })()}
 
                         {/* Standard accept/decline if no active negotiation turn */}
-                        {(!b.negotiation || b.negotiation.status !== "OPEN" || !b.negotiation.offers.find((o: any) => o.status === "PENDING" && o.proposerRole === "SEEKER")) && (
+                        {(!b.negotiation || b.negotiation.status !== "OPEN" || !b.negotiation.offers.find((o: NegotiationOffer) => o.status === "PENDING" && o.proposerRole === "SEEKER")) && (
                           <>
                             <button
                               type="button"
@@ -747,7 +751,7 @@ function BookingsPageContent() {
 
                     {/* RENTER: Negotiation waiting state */}
                     {isRenter && b.bookingStatus === "BOOKING_REQUESTED" && b.negotiation?.status === "OPEN" && (() => {
-                      const pendingOffer = b.negotiation!.offers.find((o: any) => o.status === "PENDING");
+                      const pendingOffer = b.negotiation!.offers.find((o: NegotiationOffer) => o.status === "PENDING");
                       const isMyTurn = pendingOffer && pendingOffer.proposerRole === "PROVIDER";
                       
                       if (isMyTurn) {
@@ -778,7 +782,7 @@ function BookingsPageContent() {
                         return (
                           <span className="text-xs text-stone-500 bg-stone-100 px-3 py-1.5 rounded-lg flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5 animate-pulse" />
-                            Awaiting owner's response…
+                            Awaiting owner&apos;s response…
                           </span>
                         );
                       }
@@ -1118,7 +1122,7 @@ function BookingsPageContent() {
                       )}
 
                       {/* Renter Claim Response Buttons (if renter view) */}
-                      {user?.id !== selectedBooking.provider.name && selectedBooking.bookingStatus === "DISPUTED" && !selectedBooking.disputes?.[0]?.renterResponse && (
+                      {business?.id === selectedBooking.seekerId && selectedBooking.bookingStatus === "DISPUTED" && !selectedBooking.disputes?.[0]?.renterResponse && (
                         <div className="flex items-center gap-3 pt-2">
                           <button
                             type="button"
@@ -1157,7 +1161,7 @@ function BookingsPageContent() {
                       <div className="space-y-3">
                         {selectedBooking.negotiation.offers.map((offer: NegotiationOffer, idx: number) => {
                           const isSeeker = offer.proposerRole === "SEEKER";
-                          const myBusinessId = (user as any)?.business?.id;
+                          const myBusinessId = business?.id;
                           const isMyOffer = myBusinessId && offer.proposer.id === myBusinessId;
                           
                           return (
@@ -1195,7 +1199,7 @@ function BookingsPageContent() {
 
                               {offer.message && (
                                 <p className="text-xs text-stone-700 bg-white rounded-lg p-2 border border-stone-100">
-                                  "{offer.message}"
+                                  &quot;{offer.message}&quot;
                                 </p>
                               )}
 
@@ -1212,8 +1216,8 @@ function BookingsPageContent() {
                         const pendingOffer = selectedBooking.negotiation!.offers.find((o: NegotiationOffer) => o.status === "PENDING");
                         if (!pendingOffer) return null;
 
-                        const isRenter = selectedBooking.seekerId === (user as any)?.business?.id;
-                        const isOwner  = selectedBooking.providerId === (user as any)?.business?.id;
+                        const isRenter = selectedBooking.seekerId === business?.id;
+                        const isOwner  = selectedBooking.providerId === business?.id;
                         const isMyTurn = (isRenter && pendingOffer.proposerRole === "PROVIDER") ||
                                          (isOwner && pendingOffer.proposerRole === "SEEKER");
 
