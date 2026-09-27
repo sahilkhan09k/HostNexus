@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { RagService } from "../services/rag/rag.service.js";
+import { VectorStoreService } from "../services/rag/vector-store.js";
+import { multiItemListingMatches } from "./fixtures/multi-item-listings.js";
 
 describe("HostNexus RAG Pipeline", () => {
   // Deterministic: exercise the built-in synthesis engine, never a paid external LLM
@@ -7,8 +9,12 @@ describe("HostNexus RAG Pipeline", () => {
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("GEMINI_API_KEY", "");
     vi.stubEnv("OPENAI_API_KEY", "");
+    vi.spyOn(VectorStoreService, "searchResources").mockResolvedValue(multiItemListingMatches);
   });
-  afterAll(() => vi.unstubAllEnvs());
+  afterAll(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it("should comprehensively answer damage policy questions with 4-stage chain of custody and escrow details", async () => {
     const res = await RagService.processQuery({

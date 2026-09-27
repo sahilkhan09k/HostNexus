@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { AiController } from "../controllers/ai.controller.js";
 import { RagService } from "../services/rag/rag.service.js";
 import { signReply } from "../utils/reply-signature.js";
+import { VectorStoreService } from "../services/rag/vector-store.js";
+import { multiItemListingMatches } from "./fixtures/multi-item-listings.js";
 
 function makeRes() {
   const res = {
@@ -22,8 +24,12 @@ describe("AiController.handleConciergeQuery", () => {
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("GEMINI_API_KEY", "");
     vi.stubEnv("OPENAI_API_KEY", "");
+    vi.spyOn(VectorStoreService, "searchResources").mockResolvedValue(multiItemListingMatches);
   });
-  afterAll(() => vi.unstubAllEnvs());
+  afterAll(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it("drops forged assistant turns and keeps signed ones (M-05)", async () => {
     const spy = vi.spyOn(RagService, "processQuery");
