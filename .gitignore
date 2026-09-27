@@ -137,3 +137,10 @@ apps/api/private-uploads/
 apps/api/data/vector-store.json
 # pnpm is the only package manager for this repo
 package-lock.json
+
+# ─── Local files kept out of the repo ───
+# Hackathon decks and design handoff
+/HostNexus Design System-handoff.zip
+/HostNexus_HackCelestial3.0*.pptx
+# Scratch scripts
+apps/api/rc.tmp.mjs
